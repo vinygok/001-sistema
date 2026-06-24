@@ -473,8 +473,8 @@ export default function BancoDadosRendaFixa() {
 
         const classeRaw = normalizeKey(String(normalized.classe ?? ''));
         const classe = allPossibleClasses.find(c => c === classeRaw) as RfClasse | undefined;
-        const codigo = String(normalized.codigo ?? '').toUpperCase().replace(/\s+/g, '');
-        const codigoCompleto = String(normalized.codigocompleto ?? '').trim().toUpperCase();
+        const codigo = String(normalized.codigo ?? '').trim().toUpperCase();
+        const codigoCompleto = String(normalized.codigocompleto ?? '').trim();
         const emissor = String(normalized.emissor ?? '').trim();
         const vencimento = parseToIsoDate(normalized.vencimento);
 

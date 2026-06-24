@@ -451,7 +451,11 @@ export function useStore() {
     if (!data.codigoCompleto || !data.codigoCompleto.trim()) {
       throw new Error('Codigo Completo e obrigatorio');
     }
-    const fullCode = data.codigoCompleto.toUpperCase().replace(/\s+/g, '');
+    const fullCode = data.codigoCompleto.trim();
+    const fullCodeNorm = fullCode.toUpperCase().replace(/\s+/g, ''); // só para comparação de duplicata
+    const duplicate = storeData.rendasFixasReferencia.some(
+    r => (r.codigoCompleto || '').toUpperCase().replace(/\s+/g, '') === fullCodeNorm
+    );// ...codigoCompleto: fullCode, // ← salva o valor original, sem forçar maiúsculas
     const duplicate = storeData.rendasFixasReferencia.some(
       r => (r.codigoCompleto || '').toUpperCase().replace(/\s+/g, '') === fullCode
     );
@@ -497,11 +501,17 @@ export function useStore() {
       items.forEach(item => {
         if (!item.codigoCompleto || !item.codigoCompleto.trim()) return; // Pular itens sem Codigo Completo
         
-        const fullCode = item.codigoCompleto.toUpperCase().replace(/\s+/g, '');
+        const fullCode = item.codigoCompleto.trim(); // valor original preservado
+        const fullCodeNorm = fullCode.toUpperCase().replace(/\s+/g, ''); // só para busca/comparação
+        const existingIdx = nextRefs.findIndex(
+        r => (r.codigoCompleto || '').toUpperCase().replace(/\s+/g, '') === fullCodeNorm
+        ); // ...codigoCompleto: fullCode, // ← usa o original
         const existingIdx = nextRefs.findIndex(
           r => (r.codigoCompleto || '').toUpperCase().replace(/\s+/g, '') === fullCode
         );
-        
+        const nextCodigoCompleto = data.codigoCompleto
+        ?data.codigoCompleto.trim()
+        : ref.codigoCompleto;
         const codigoNorm = item.codigo.toUpperCase().replace(/\s+/g, '');
         const codigoCompletoNorm = fullCode;
 
