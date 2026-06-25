@@ -1,5 +1,5 @@
 # SNAPSHOT CODIGO
-# Gerado em: 2026-06-24T18:20:28.587Z
+# Gerado em: 2026-06-25T00:36:26.654Z
 # Total de arquivos: 33
 
 ===== BEGIN FILE: index.html =====
@@ -5192,6 +5192,12 @@ export default function BancoDadosFundos() {
     addToast('Fundo removido.', 'info');
   };
 
+  const handleClearAllFundos = () => {
+    if (!window.confirm('Tem certeza que deseja apagar TODOS os fundos cadastrados? Essa ação não pode ser desfeita.')) return;
+    store.setFundosReferencia([]);
+    addToast('Todos os fundos foram removidos.', 'info');
+  };
+
   const handleToggleAtivo = (fundo: FundoReferencia) => {
     store.updateFundoReferencia(fundo.id, { ativo: !fundo.ativo });
   };
@@ -5479,6 +5485,12 @@ export default function BancoDadosFundos() {
               className="flex items-center gap-2 px-3 py-2 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700"
             >
               <DollarSign size={16} /> Aplicar Preços nos Ativos
+            </button>
+            <button
+              onClick={handleClearAllFundos}
+              className="flex items-center gap-2 px-3 py-2 border border-red-300 text-red-700 rounded-lg text-sm font-medium hover:bg-red-50"
+            >
+              <Trash2 size={16} /> Limpar ativos
             </button>
           </div>
         </div>
@@ -6152,6 +6164,12 @@ export default function BancoDadosRendaFixa() {
     addToast('Titulo removido.', 'info');
   };
 
+  const handleClearAllRendaFixa = () => {
+    if (!window.confirm('Tem certeza que deseja excluir TODOS os ativos de Renda Fixa? Essa ação não pode ser desfeita.')) return;
+    store.setRendasFixasReferencia([]);
+    addToast('Todos os ativos de Renda Fixa foram excluídos.', 'info');
+  };
+
   const handleDownloadTemplate = () => {
     const rows = [
       {
@@ -6425,6 +6443,12 @@ export default function BancoDadosRendaFixa() {
               }`}
             >
               <Calculator size={16} /> Recalcular Posicoes
+            </button>
+            <button
+              onClick={handleClearAllRendaFixa}
+              className="flex items-center gap-2 px-3 py-2 border border-red-300 text-red-700 rounded-lg text-sm font-medium hover:bg-red-50"
+            >
+              <Trash2 size={16} /> Excluir ativos
             </button>
           </div>
         </div>
@@ -7366,7 +7390,11 @@ export default function DatabaseDashboard() {
   const removeRvRow = (id: string) => {
     store.deleteRvPrice(id);
   };
-
+  const clearRvPrices = () => {
+  if (!window.confirm('Tem certeza que deseja apagar TODOS os ativos de Renda Variável? Essa ação não pode ser desfeita.')) return;
+  store.setRvPrices([]);
+  };
+  
   const handleRvFileSelect = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -7851,10 +7879,20 @@ export default function DatabaseDashboard() {
             {rvApiMessage && <p className="mt-2 text-xs text-blue-700">{rvApiMessage}</p>}
           </div>
 
-          <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+            <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
             <div className="flex items-center justify-between p-4 border-b border-gray-100">
-              <h4 className="font-medium text-gray-800 text-sm">Tabela de precos</h4>
-              <button onClick={addRvRow} className="px-3 py-2 bg-indigo-600 text-white rounded-lg text-sm hover:bg-indigo-700 flex items-center gap-1"><Plus size={14} /> Cadastrar novo ativo</button>
+              <h4 className="font-medium text-gray-800 text-sm">Tabela de preços</h4>
+              <div className="flex items-center gap-2">
+                <button onClick={addRvRow} className="px-3 py-2 bg-indigo-600 text-white rounded-lg text-sm hover:bg-indigo-700 flex items-center gap-1">
+                  <Plus size={14} /> Cadastrar novo ativo
+                </button>
+                <button
+                  onClick={clearRvPrices}
+                  className="px-3 py-2 border border-red-300 text-red-700 rounded-lg text-sm hover:bg-red-50 flex items-center gap-1"
+                >
+                  <Trash2 size={14} /> Limpar ativos
+                </button>
+              </div>
             </div>
             <div className="overflow-x-auto max-h-[560px]">
               <table className="w-full min-w-[600px] border-collapse">
@@ -7915,8 +7953,8 @@ export default function DatabaseDashboard() {
                   })}
                 </tbody>
               </table>
-            </div>
           </div>
+        </div>
         </>
       )}
 
@@ -12203,6 +12241,11 @@ export function useStore() {
     }));
   }, []);
 
+  /** Substitui toda a lista de fundos de referência (ex: limpar tudo) */
+  const setFundosReferencia = useCallback((fundos: FundoReferencia[]) => {
+  updateStore(s => ({ ...s, fundosReferencia: fundos }));
+  }, []);
+
   /**
    * Importação em lote de fundos de referência (upsert por CNPJ).
    * Se já existir um fundo com o mesmo CNPJ, atualiza; caso contrário, insere.
@@ -12312,6 +12355,11 @@ export function useStore() {
       ...s,
       rendasFixasReferencia: s.rendasFixasReferencia.filter(r => r.id !== id),
     }));
+  }, []);
+
+  /** Substitui toda a lista de rendas fixas de referência (ex: limpar tudo) */
+const setRendasFixasReferencia = useCallback((refs: RendaFixaReferencia[]) => {
+  updateStore(s => ({ ...s, rendasFixasReferencia: refs }));
   }, []);
 
   /**
@@ -12453,6 +12501,7 @@ export function useStore() {
     addFundoReferencia,
     updateFundoReferencia,
     deleteFundoReferencia,
+    setFundosReferencia,
     bulkUpsertFundoReferencia,
     updateCotaFundo,
 
@@ -12460,6 +12509,7 @@ export function useStore() {
     addRendaFixaReferencia,
     updateRendaFixaReferencia,
     deleteRendaFixaReferencia,
+    setRendasFixasReferencia,
     bulkUpsertRendaFixaReferencia,
 
     // ── Draft Notes ──────────────────────────────────────────────────────────

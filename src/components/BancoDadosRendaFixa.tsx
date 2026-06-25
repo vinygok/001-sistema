@@ -372,6 +372,12 @@ export default function BancoDadosRendaFixa() {
     addToast('Titulo removido.', 'info');
   };
 
+  const handleClearAllRendaFixa = () => {
+    if (!window.confirm('Tem certeza que deseja excluir TODOS os ativos de Renda Fixa? Essa ação não pode ser desfeita.')) return;
+    store.setRendasFixasReferencia([]);
+    addToast('Todos os ativos de Renda Fixa foram excluídos.', 'info');
+  };
+
   const handleDownloadTemplate = () => {
     const rows = [
       {
@@ -645,6 +651,12 @@ export default function BancoDadosRendaFixa() {
               }`}
             >
               <Calculator size={16} /> Recalcular Posicoes
+            </button>
+            <button
+              onClick={handleClearAllRendaFixa}
+              className="flex items-center gap-2 px-3 py-2 border border-red-300 text-red-700 rounded-lg text-sm font-medium hover:bg-red-50"
+            >
+              <Trash2 size={16} /> Excluir ativos
             </button>
           </div>
         </div>

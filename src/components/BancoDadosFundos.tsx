@@ -310,6 +310,12 @@ export default function BancoDadosFundos() {
     addToast('Fundo removido.', 'info');
   };
 
+  const handleClearAllFundos = () => {
+    if (!window.confirm('Tem certeza que deseja apagar TODOS os fundos cadastrados? Essa ação não pode ser desfeita.')) return;
+    store.setFundosReferencia([]);
+    addToast('Todos os fundos foram removidos.', 'info');
+  };
+
   const handleToggleAtivo = (fundo: FundoReferencia) => {
     store.updateFundoReferencia(fundo.id, { ativo: !fundo.ativo });
   };
@@ -597,6 +603,12 @@ export default function BancoDadosFundos() {
               className="flex items-center gap-2 px-3 py-2 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700"
             >
               <DollarSign size={16} /> Aplicar Preços nos Ativos
+            </button>
+            <button
+              onClick={handleClearAllFundos}
+              className="flex items-center gap-2 px-3 py-2 border border-red-300 text-red-700 rounded-lg text-sm font-medium hover:bg-red-50"
+            >
+              <Trash2 size={16} /> Limpar ativos
             </button>
           </div>
         </div>

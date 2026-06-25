@@ -386,7 +386,11 @@ export default function DatabaseDashboard() {
   const removeRvRow = (id: string) => {
     store.deleteRvPrice(id);
   };
-
+  const clearRvPrices = () => {
+  if (!window.confirm('Tem certeza que deseja apagar TODOS os ativos de Renda Variável? Essa ação não pode ser desfeita.')) return;
+  store.setRvPrices([]);
+  };
+  
   const handleRvFileSelect = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -871,10 +875,20 @@ export default function DatabaseDashboard() {
             {rvApiMessage && <p className="mt-2 text-xs text-blue-700">{rvApiMessage}</p>}
           </div>
 
-          <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+            <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
             <div className="flex items-center justify-between p-4 border-b border-gray-100">
-              <h4 className="font-medium text-gray-800 text-sm">Tabela de precos</h4>
-              <button onClick={addRvRow} className="px-3 py-2 bg-indigo-600 text-white rounded-lg text-sm hover:bg-indigo-700 flex items-center gap-1"><Plus size={14} /> Cadastrar novo ativo</button>
+              <h4 className="font-medium text-gray-800 text-sm">Tabela de preços</h4>
+              <div className="flex items-center gap-2">
+                <button onClick={addRvRow} className="px-3 py-2 bg-indigo-600 text-white rounded-lg text-sm hover:bg-indigo-700 flex items-center gap-1">
+                  <Plus size={14} /> Cadastrar novo ativo
+                </button>
+                <button
+                  onClick={clearRvPrices}
+                  className="px-3 py-2 border border-red-300 text-red-700 rounded-lg text-sm hover:bg-red-50 flex items-center gap-1"
+                >
+                  <Trash2 size={14} /> Limpar ativos
+                </button>
+              </div>
             </div>
             <div className="overflow-x-auto max-h-[560px]">
               <table className="w-full min-w-[600px] border-collapse">
@@ -935,8 +949,8 @@ export default function DatabaseDashboard() {
                   })}
                 </tbody>
               </table>
-            </div>
           </div>
+        </div>
         </>
       )}
 

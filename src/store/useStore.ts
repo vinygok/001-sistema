@@ -599,6 +599,11 @@ export function useStore() {
     }));
   }, []);
 
+  /** Substitui toda a lista de fundos de referência (ex: limpar tudo) */
+  const setFundosReferencia = useCallback((fundos: FundoReferencia[]) => {
+  updateStore(s => ({ ...s, fundosReferencia: fundos }));
+  }, []);
+
   /**
    * Importação em lote de fundos de referência (upsert por CNPJ).
    * Se já existir um fundo com o mesmo CNPJ, atualiza; caso contrário, insere.
@@ -708,6 +713,11 @@ export function useStore() {
       ...s,
       rendasFixasReferencia: s.rendasFixasReferencia.filter(r => r.id !== id),
     }));
+  }, []);
+
+  /** Substitui toda a lista de rendas fixas de referência (ex: limpar tudo) */
+const setRendasFixasReferencia = useCallback((refs: RendaFixaReferencia[]) => {
+  updateStore(s => ({ ...s, rendasFixasReferencia: refs }));
   }, []);
 
   /**
@@ -849,6 +859,7 @@ export function useStore() {
     addFundoReferencia,
     updateFundoReferencia,
     deleteFundoReferencia,
+    setFundosReferencia,
     bulkUpsertFundoReferencia,
     updateCotaFundo,
 
@@ -856,6 +867,7 @@ export function useStore() {
     addRendaFixaReferencia,
     updateRendaFixaReferencia,
     deleteRendaFixaReferencia,
+    setRendasFixasReferencia,
     bulkUpsertRendaFixaReferencia,
 
     // ── Draft Notes ──────────────────────────────────────────────────────────
