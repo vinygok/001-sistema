@@ -1,5 +1,5 @@
 # SNAPSHOT CODIGO
-# Gerado em: 2026-06-25T00:36:26.654Z
+# Gerado em: 2026-06-25T07:37:20.197Z
 # Total de arquivos: 33
 
 ===== BEGIN FILE: index.html =====
@@ -3077,7 +3077,7 @@ import { useRef, useState, useMemo, type ChangeEvent } from 'react';
 import { Briefcase, Plus, Edit2, Trash2, Check, X, Search, Tag, Upload, Download, ChevronDown, ChevronRight, AlertTriangle, ArrowUpDown, Database } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { useStore } from '../store/useStore';
-import type { Asset, AssetMovement, AssetTargetMode, AssetType, AssetUpdateSource, MovementType } from '../types';
+import type { Asset, AssetMovement, AssetIndexer, AssetTargetMode, AssetUpdateSource, MovementType } from '../types';
 import Modal from './Modal';
 import { formatCurrency } from '../utils/portfolio';
 import { validateAssetForPerformance } from '../services/performance';
@@ -3085,7 +3085,7 @@ import { validateAssetForPerformance } from '../services/performance';
 interface AssetForm {
   name: string;
   nomeExibicao: string;
-  tipo: AssetType;
+  tipo: string;
   tickerCodigo: string;
   cnpj: string;
   isin: string;
@@ -3103,17 +3103,23 @@ interface AssetForm {
   origemAtualizacao: AssetUpdateSource;
   modoMetaAtivo: AssetTargetMode;
   valorMetaAtivo: string;
+  matchedSource: 'rv' | 'fundo' | 'rf' | null;
+  vencimentoRF: string;
+  tipoIndexadorRF: AssetIndexer | '';
+  taxaContratada: string;
 }
 
 interface DbSuggestion {
   id: string;
   name: string;
   source: 'rv' | 'fundo' | 'rf';
-  tipo?: AssetType;
+  tipo?: string;
   tickerCodigo?: string;
   cnpj?: string;
   codigo?: string;
   precoUnitario?: number;
+  vencimento?: string;
+  tipoIndexador?: AssetIndexer;
 }
 
 interface MovementForm {
@@ -3137,7 +3143,7 @@ interface ImportResult {
 const emptyForm: AssetForm = {
   name: '',
   nomeExibicao: '',
-  tipo: 'outro',
+  tipo: '',
   tickerCodigo: '',
   cnpj: '',
   isin: '',
@@ -3152,6 +3158,10 @@ const emptyForm: AssetForm = {
   origemAtualizacao: 'manual',
   modoMetaAtivo: 'score',
   valorMetaAtivo: '1',
+  matchedSource: null,
+  vencimentoRF: '',
+  tipoIndexadorRF: '',
+  taxaContratada: '',
 };
 
 const emptyMovement: MovementForm = {
@@ -3354,7 +3364,7 @@ export default function AssetManager() {
           id: r.id,
           name: r.tickerCodigo,
           source: 'rv',
-          tipo: r.classe as AssetType,
+          tipo: r.classe,
           tickerCodigo: r.tickerCodigo,
           precoUnitario: r.precoUnitario,
         });
@@ -3375,7 +3385,7 @@ export default function AssetManager() {
         });
       });
     
-    // Renda Fixa - usa Codigo Completo como nome principal (so mostra se tiver codigoCompleto preenchido)
+// Renda Fixa - usa Codigo Completo como nome principal (so mostra se tiver codigoCompleto preenchido)
     store.rendasFixasReferencia
       .filter(r => {
         if (!r.codigoCompleto) return false; // So mostra ativos com Codigo Completo preenchido
@@ -3389,8 +3399,10 @@ export default function AssetManager() {
           id: r.id,
           name: r.codigoCompleto!,
           source: 'rf',
-          tipo: r.classe as AssetType,
+          tipo: r.classe,
           codigo: r.codigo,
+          vencimento: r.vencimento,
+          tipoIndexador: r.tipoIndexador,
         });
       });
     
@@ -3405,17 +3417,23 @@ export default function AssetManager() {
     setRefreshKey(prev => prev + 1); // Força atualização visual
   };
 
-  const selectSuggestion = (s: DbSuggestion) => {
+const selectSuggestion = (s: DbSuggestion) => {
     setForm(prev => ({
       ...prev,
       name: s.name,
-      tipo: s.tipo ?? prev.tipo,
-      tickerCodigo: s.tickerCodigo ?? prev.tickerCodigo,
-      cnpj: s.cnpj ? formatCnpj(s.cnpj) : prev.cnpj,
-      precoUnitario: s.precoUnitario !== undefined ? String(s.precoUnitario) : prev.precoUnitario,
+      tipo: s.tipo ?? '',
+      tickerCodigo: s.source === 'rv' ? (s.tickerCodigo ?? '') : '',
+      cnpj: s.source === 'fundo' ? (s.cnpj ? formatCnpj(s.cnpj) : '') : '',
+      precoUnitario: s.precoUnitario !== undefined ? String(s.precoUnitario) : '',
       referenciaRVId: s.source === 'rv' ? s.id : undefined,
       referenciaFundoId: s.source === 'fundo' ? s.id : undefined,
       referenciaRFId: s.source === 'rf' ? s.id : undefined,
+      matchedSource: s.source,
+      identificadorExterno: s.source === 'rf' ? (s.codigo ?? '') : '',
+      vencimentoRF: s.source === 'rf' ? (s.vencimento ?? '') : '',
+      tipoIndexadorRF: s.source === 'rf' ? (s.tipoIndexador ?? '') : '',
+      taxaContratada: '',
+      quantidade: '',
     }));
     setShowSuggestions(false);
     setSuggestions([]);
@@ -3430,11 +3448,13 @@ export default function AssetManager() {
     setShowModal(true);
   };
 
-  const openEdit = (asset: Asset) => {
+const openEdit = (asset: Asset) => {
+    const matchedSource: 'rv' | 'fundo' | 'rf' | null =
+      asset.referenciaRVId ? 'rv' : asset.referenciaFundoId ? 'fundo' : asset.referenciaRFId ? 'rf' : null;
     setForm({
       name: asset.name,
       nomeExibicao: asset.nomeExibicao ?? asset.name,
-      tipo: asset.tipo ?? 'outro',
+      tipo: asset.tipo ?? '',
       tickerCodigo: asset.tickerCodigo ?? '',
       cnpj: asset.cnpj ?? '',
       isin: asset.isin ?? '',
@@ -3452,12 +3472,18 @@ export default function AssetManager() {
       origemAtualizacao: asset.origemAtualizacao ?? 'manual',
       modoMetaAtivo: asset.modoMetaAtivo ?? asset.idealTargetMode ?? 'score',
       valorMetaAtivo: String(asset.valorMetaAtivo ?? asset.idealTargetValue ?? 1),
+      matchedSource,
+      vencimentoRF: asset.dataVencimento ?? '',
+      tipoIndexadorRF: asset.tipoIndexador ?? '',
+      taxaContratada: asset.taxaContratada !== undefined
+        ? String(asset.taxaContratada)
+        : (asset.spreadContratado !== undefined ? String(asset.spreadContratado) : ''),
     });
     setEditId(asset.id);
     setShowModal(true);
   };
 
-  const handleSave = () => {
+const handleSave = () => {
     const quantidade = parseSheetNumber(form.quantidade);
     const precoUnitario = parseSheetNumber(form.precoUnitario);
     const valorPosicaoInput = parseSheetNumber(form.valorPosicao);
@@ -3465,10 +3491,15 @@ export default function AssetManager() {
       ? roundMoney(quantidade * precoUnitario)
       : roundMoney(Number.isFinite(valorPosicaoInput) ? valorPosicaoInput : 0);
 
+    const isRendaFixa = form.matchedSource === 'rf';
+    const spreadIndexadores: AssetIndexer[] = ['cdi_mais_spread', 'ipca_mais_spread', 'igpm_mais_spread'];
+    const taxaContratadaNum = parseSheetNumber(form.taxaContratada);
+    const usaSpread = isRendaFixa && form.tipoIndexadorRF && spreadIndexadores.includes(form.tipoIndexadorRF as AssetIndexer);
+
     const payload: Partial<Omit<Asset, 'id' | 'clientId'>> = {
       name: form.name.trim(),
       nomeExibicao: (form.nomeExibicao || form.name).trim(),
-      tipo: form.tipo,
+      tipo: form.matchedSource ? (form.tipo || 'outro') : 'outro',
       tickerCodigo: form.tickerCodigo || undefined,
       cnpj: form.cnpj || undefined,
       isin: form.isin || undefined,
@@ -3490,6 +3521,10 @@ export default function AssetManager() {
       valorMetaAtivo: Number.isFinite(parseSheetNumber(form.valorMetaAtivo)) ? parseSheetNumber(form.valorMetaAtivo) : 0,
       idealTargetMode: form.modoMetaAtivo,
       idealTargetValue: Number.isFinite(parseSheetNumber(form.valorMetaAtivo)) ? parseSheetNumber(form.valorMetaAtivo) : 0,
+      dataVencimento: isRendaFixa ? (form.vencimentoRF || undefined) : undefined,
+      tipoIndexador: isRendaFixa ? (form.tipoIndexadorRF || undefined) : undefined,
+      taxaContratada: isRendaFixa && !usaSpread && Number.isFinite(taxaContratadaNum) ? taxaContratadaNum : undefined,
+      spreadContratado: isRendaFixa && usaSpread && Number.isFinite(taxaContratadaNum) ? taxaContratadaNum : undefined,
     };
 
     if (editId) {
@@ -3619,7 +3654,7 @@ export default function AssetManager() {
           continue;
         }
 
-        const tipo = (normalizeKey(String(normalized.tipo ?? 'outro')) || 'outro') as AssetType;
+        const tipo = normalizeKey(String(normalized.tipo ?? 'outro')) || 'outro';
         const qtd = parseSheetNumber(normalized.quantidade);
         const unit = parseSheetNumber(normalized.precounitario);
         const rawValor = parseSheetNumber(normalized.valorposicao ?? normalized.valor);
@@ -4242,7 +4277,8 @@ export default function AssetManager() {
 
       {showModal && (
         <Modal title={editId ? 'Editar Ativo' : 'Novo Ativo'} onClose={() => setShowModal(false)} size="lg">
-          <div className="grid gap-3 md:grid-cols-2">
+
+<div className="flex flex-col gap-3">
             <div className="relative">
               <label className="block text-sm font-medium text-gray-700 mb-1">Nome *</label>
               <input
@@ -4280,10 +4316,12 @@ export default function AssetManager() {
                 </div>
               )}
             </div>
+
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Nome exibicao</label>
               <input value={form.nomeExibicao} onChange={e => setForm(prev => ({ ...prev, nomeExibicao: e.target.value }))} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" />
             </div>
+
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Estrategia</label>
               <select value={form.strategyId} onChange={e => setForm(prev => ({ ...prev, strategyId: e.target.value, subStrategyId: '' }))} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm">
@@ -4291,6 +4329,7 @@ export default function AssetManager() {
                 {strategies.map(strategy => <option key={strategy.id} value={strategy.id}>{strategy.name}</option>)}
               </select>
             </div>
+
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Subestrategia</label>
               <select value={form.subStrategyId} onChange={e => setForm(prev => ({ ...prev, subStrategyId: e.target.value }))} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm">
@@ -4298,6 +4337,7 @@ export default function AssetManager() {
                 {subStrategiesForSelected.map(ss => <option key={ss.id} value={ss.id}>{ss.name}</option>)}
               </select>
             </div>
+
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Modo meta ativo</label>
               <select value={form.modoMetaAtivo} onChange={e => setForm(prev => ({ ...prev, modoMetaAtivo: e.target.value as AssetTargetMode }))} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm">
@@ -4305,58 +4345,78 @@ export default function AssetManager() {
                 <option value="percentage">percentage</option>
               </select>
             </div>
+
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Valor meta ativo</label>
               <input type="number" value={form.valorMetaAtivo} onChange={e => setForm(prev => ({ ...prev, valorMetaAtivo: e.target.value }))} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" />
             </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Tipo</label>
-              <select value={form.tipo} onChange={e => setForm(prev => ({ ...prev, tipo: e.target.value as AssetType }))} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm">
-                {['acao','fii','etf','bdr','fundo','cdb','cri','cra','debenture','coe','cripto','conta_corrente','valores_em_transito','outro'].map(type => <option key={type} value={type}>{type}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Ticker/Codigo</label>
-              <input value={form.tickerCodigo} onChange={e => setForm(prev => ({ ...prev, tickerCodigo: e.target.value }))} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Codigo (Renda Fixa)</label>
-              <input value={form.identificadorExterno} onChange={e => setForm(prev => ({ ...prev, identificadorExterno: e.target.value }))} placeholder="Ex: CRA02300CYT" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">CNPJ</label>
-              <input value={form.cnpj} onChange={e => setForm(prev => ({ ...prev, cnpj: e.target.value }))} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">ISIN</label>
-              <input value={form.isin} onChange={e => setForm(prev => ({ ...prev, isin: e.target.value }))} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Identificador Externo</label>
-              <input value={form.identificadorExterno} onChange={e => setForm(prev => ({ ...prev, identificadorExterno: e.target.value }))} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Quantidade</label>
-              <input type="number" step="0.00000001" value={form.quantidade} onChange={e => setForm(prev => ({ ...prev, quantidade: e.target.value }))} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Preco Unitario</label>
-              <input type="number" step="0.00000001" value={form.precoUnitario} onChange={e => setForm(prev => ({ ...prev, precoUnitario: e.target.value }))} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" />
-            </div>
+
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Valor Posicao</label>
               <input type="number" step="0.01" value={form.valorPosicao} onChange={e => setForm(prev => ({ ...prev, valorPosicao: e.target.value }))} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" />
             </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Origem atualizacao</label>
-              <select value={form.origemAtualizacao} onChange={e => setForm(prev => ({ ...prev, origemAtualizacao: e.target.value as AssetUpdateSource }))} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm">
-                {['manual','importacao_excel','extrato_btg','api','outro'].map(origin => <option key={origin} value={origin}>{origin}</option>)}
-              </select>
-            </div>
-            <label className="flex items-center gap-2 text-sm text-gray-700 mt-6">
+
+            <label className="flex items-center gap-2 text-sm text-gray-700">
               <input type="checkbox" checked={form.isentoIR} onChange={e => setForm(prev => ({ ...prev, isentoIR: e.target.checked }))} />
               Isento de IR
             </label>
+
+            {form.matchedSource && (
+              <>
+                <div className="border-t border-gray-100 pt-3">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Tipo</label>
+                  <input value={form.tipo} disabled className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-gray-50 text-gray-500" />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Quantidade</label>
+                  <input type="number" step="0.00000001" value={form.quantidade} onChange={e => setForm(prev => ({ ...prev, quantidade: e.target.value }))} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Preco Unitario</label>
+                  <input type="number" step="0.00000001" value={form.precoUnitario} onChange={e => setForm(prev => ({ ...prev, precoUnitario: e.target.value }))} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" />
+                </div>
+              </>
+            )}
+
+            {form.matchedSource === 'rv' && (
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Ticker/Codigo</label>
+                <input value={form.tickerCodigo} disabled className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-gray-50 text-gray-500" />
+              </div>
+            )}
+
+            {form.matchedSource === 'fundo' && (
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">CNPJ</label>
+                <input value={form.cnpj} disabled className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-gray-50 text-gray-500" />
+              </div>
+            )}
+
+            {form.matchedSource === 'rf' && (
+              <>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Codigo (Renda Fixa)</label>
+                  <input value={form.identificadorExterno} disabled className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-gray-50 text-gray-500" />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Vencimento</label>
+                  <input type="date" value={form.vencimentoRF} disabled className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-gray-50 text-gray-500" />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Indexador *</label>
+                  <input value={form.tipoIndexadorRF} disabled className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-gray-50 text-gray-500" />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Taxa contratada</label>
+                  <input type="number" step="0.01" value={form.taxaContratada} onChange={e => setForm(prev => ({ ...prev, taxaContratada: e.target.value }))} placeholder="Ex: 2 ou 0,3" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" />
+                </div>
+              </>
+            )}
           </div>
 
           <div className="flex gap-3 pt-4">
