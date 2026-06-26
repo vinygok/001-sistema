@@ -77,7 +77,7 @@ export interface Asset {
   clientId: string;
   name: string;
   nomeExibicao: string;
-  tipo: AssetType;
+  tipo: string;
   tickerCodigo?: string;
   cnpj?: string;
   isin?: string;

@@ -1,5 +1,5 @@
 import * as XLSX from 'xlsx';
-import type { Asset, AssetType } from '../types';
+import type { Asset } from '../types';
 
 export type MatchMethod = 'id' | 'cnpj' | 'ticker' | 'name' | 'fuzzy' | 'none';
 
@@ -13,7 +13,19 @@ export interface ParsedPosition {
   ticker?: string;
   codigo?: string;
   externalId?: string;
-  suggestedType: AssetType;
+  /**
+   * Tipo "sugerido" pela secao do extrato (ex: a aba contem "CDB").
+   * Usado so como fallback de exibicao no preview — quando o Nome bate
+   * com um ativo do Banco de Dados (catalogo), o Tipo final gravado vem
+   * sempre do catalogo, nunca dessa sugestao (ver PositionUpdateDashboard).
+   */
+  suggestedType: string;
+  /**
+   * Taxa contratada de Renda Fixa, extraida da mesma coluna do extrato
+   * usada para montar o nome do ativo (ex: "CDB Banco XYZ 102% 2029").
+   * So existe para posicoes de Renda Fixa.
+   */
+  taxaContratada?: number;
 }
 
 export interface MatchCandidate {
@@ -34,7 +46,7 @@ export interface PreviewRow {
   importName: string;
   importValue: number;
   importSection: string;
-  suggestedType: AssetType;
+  suggestedType: string;
   matchedAssetId?: string;
   matchMethod: MatchMethod;
   matchConfidence: number;
@@ -44,6 +56,8 @@ export interface PreviewRow {
   ticker?: string;
   codigo?: string;
   externalId?: string;
+  /** Taxa contratada de Renda Fixa (ver ParsedPosition.taxaContratada). */
+  taxaContratada?: number;
 }
 
 function normalize(value: string): string {
@@ -54,6 +68,54 @@ function normalize(value: string): string {
     .replace(/\s+/g, ' ')
     .trim();
 }
+/**
+ * Extrai o primeiro numero de um texto livre, sem tentar interpretar a
+ * frase inteira. Usada para a Taxa Contratada de Renda Fixa, que no
+ * extrato BTG vem misturada com texto (ex: "15,00% a.a.", "IPCA + 8,25%",
+ * "102% do CDI") — texto esse que continua sendo usado, sem alteracao,
+ * para compor o Nome do ativo (ver montagem de "name" nesta funcao).
+ *
+ * Diferente de parseBrNumber (que tenta interpretar o texto inteiro como
+ * um valor monetario), esta funcao so pega o primeiro trecho numerico
+ * que encontrar e ignora todo o resto — robusta a qualquer sufixo/prefixo
+ * de texto que o extrato venha a usar.
+ */
+function parseFirstNumberFromText(value: unknown): number | undefined {
+  const text = String(value ?? '').trim();
+  if (!text) return undefined;
+  const match = text.match(/-?\d+(?:[.,]\d+)?/);
+  if (match) {
+    const num = Number(match[0].replace(',', '.'));
+    if (Number.isFinite(num)) return num;
+  }
+  // Texto sem nenhum numero (ex: "CDI" puro, sem "100% CDI") significa
+  // 100% do indexador citado — comum no BTG para titulos pos-fixados
+  // simples (ex: CDB-CDB226B523E indexado a "CDI", sem spread).
+  if (/\b(cdi|selic|ipca|igp-?m|pre)\b/i.test(text)) return 100;
+  return undefined;
+}
+/**
+ * Extrai o primeiro numero de um texto livre, sem tentar interpretar a
+ * frase inteira. Usada para a Taxa Contratada de Renda Fixa, que no
+ * extrato BTG vem misturada com texto (ex: "15,00% a.a.", "IPCA + 8,25%",
+ * "94,00% do CDI") — texto esse que continua sendo usado, sem alteracao,
+ * para compor o Nome do ativo (ver montagem de "name" nesta funcao).
+ *
+ * Diferente de parseBrNumber (que tenta interpretar o texto inteiro como
+ * um valor monetario), esta funcao so pega o primeiro trecho numerico
+ * que encontrar e ignora todo o resto — robusta a qualquer sufixo/prefixo
+ * de texto que o extrato venha a usar.
+ */
+function parseFirstNumberFromText(value: unknown): number | undefined {
+  const text = String(value ?? '').trim();
+  if (!text) return undefined;
+  const match = text.match(/-?\d+(?:[.,]\d+)?/);
+  if (!match) return undefined;
+  const num = Number(match[0].replace(',', '.'));
+  return Number.isFinite(num) ? num : undefined;
+}
+
+function parseBrNumber(value: unknown): number {
 
 function parseBrNumber(value: unknown): number {
   if (typeof value === 'number') return value;
@@ -118,7 +180,7 @@ function similarity(a: string, b: string): number {
   return 1 - dist / Math.max(x.length, y.length);
 }
 
-function sectionToType(section: string): AssetType {
+function sectionToType(section: string): string {
   const s = normalize(section);
   if (s.includes('fundo') && s.includes('imobili')) return 'fii';
   if (s.includes('portfolio de fundos')) return 'fundo';
@@ -358,6 +420,7 @@ export function parseBtgWorkbook(fileBuffer: ArrayBuffer): BtgParseResult {
         let codigo = '';
         let cnpj = cols.cnpj !== undefined ? String(row[cols.cnpj] ?? '').trim() : '';
 
+let taxaContratadaRF: number | undefined;
         if (sheetNorm.includes('renda fixa')) {
           const emissor = cols.emissor !== undefined ? row[cols.emissor] : '';
           const ativo = cols.ativo !== undefined ? row[cols.ativo] : '';
@@ -366,6 +429,14 @@ export function parseBtgWorkbook(fileBuffer: ArrayBuffer): BtgParseResult {
           name = [suffix, emissor, ativo, taxa, venc].filter(Boolean).join(' ').trim();
           ticker = String(ativo ?? '').trim();
           codigo = String(ativo ?? '').trim();
+          // A mesma coluna usada para montar o nome (taxa) tambem alimenta
+          // o campo proprio taxaContratada, propagado ate o Asset final.
+          // Usa parseFirstNumberFromText (nao parseBrNumber) porque esta
+          // coluna vem com texto junto ao numero (ex: "15,00% a.a.",
+          // "94,00% do CDI") — o texto continua intacto em "taxa", usado
+          // acima para montar o name; so o numero isolado vai para
+          // taxaContratada.
+          taxaContratadaRF = parseFirstNumberFromText(taxa);
         } else if (sheetNorm.includes('coe')) {
           const descricao = cols.descricao !== undefined ? row[cols.descricao] : (cols.ativo !== undefined ? row[cols.ativo] : '');
           name = `COE ${descricao}`.trim();
@@ -405,6 +476,7 @@ export function parseBtgWorkbook(fileBuffer: ArrayBuffer): BtgParseResult {
           ticker: ticker || undefined,
           codigo: codigo || undefined,
           suggestedType: sectionToType(sectionTitle),
+          taxaContratada: taxaContratadaRF,
         });
       }
     }
@@ -482,7 +554,9 @@ export function buildPreviewRows(positions: ParsedPosition[], assets: Asset[]): 
       action: match.assetId ? 'atualizar' : 'criar',
       cnpj: position.cnpj,
       ticker: position.ticker,
+      codigo: position.codigo,
       externalId: position.externalId,
+      taxaContratada: position.taxaContratada,
     };
   });
 }

@@ -2,9 +2,11 @@ import { useRef, useState, useMemo, type ChangeEvent } from 'react';
 import { Briefcase, Plus, Edit2, Trash2, Check, X, Search, Tag, Upload, Download, ChevronDown, ChevronRight, AlertTriangle, ArrowUpDown, Database } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { useStore } from '../store/useStore';
-import type { Asset, AssetMovement, AssetIndexer, AssetTargetMode, AssetUpdateSource, MovementType } from '../types';
+import type { Asset, AssetMovement, AssetIndexer, AssetTargetMode, AssetUpdateSource, MovementType, RendaVariavelPrice, FundoReferencia, RendaFixaReferencia } from '../types';
+import { findCatalogMatch } from '../utils/assetClasses';
 import Modal from './Modal';
 import { formatCurrency } from '../utils/portfolio';
+import { buildUniqueAssetClasses, matchAssetClass } from '../utils/assetClasses';
 import { validateAssetForPerformance } from '../services/performance';
 
 interface AssetForm {
@@ -98,8 +100,18 @@ const emptyMovement: MovementForm = {
   observacao: '',
 };
 
+/**
+ * Normaliza um texto de cabecalho/celula de planilha para comparacao.
+ * Remove acentos, converte para minusculas e remove QUALQUER caractere
+ * que nao seja letra ou numero (espacos, barras, parenteses, etc).
+ *
+ * Isso permite que cabecalhos com espaco ("Valor Posicao", "Isento de IR")
+ * ou pontuacao ("Ticker/Codigo", "Codigo (Renda Fixa)") sejam comparados
+ * com as chaves internas em camelCase/sem espaco usadas no codigo
+ * (valorposicao, isentodeir, tickercodigo, codigorendafixa).
+ */
 function normalizeKey(value: string): string {
-  return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase();
+  return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-zA-Z0-9]/g, '').trim().toLowerCase();
 }
 
 function formatCnpj(cnpj: string): string {
@@ -221,7 +233,7 @@ function resolveAssetByPriority(existingAssets: Asset[], candidate: {
     const found = existingAssets.find(a => normalizeKey(a.name) === normalizeKey(candidate.name ?? ''));
     if (found) return found;
   }
-  return undefined;
+return undefined;
 }
 
 export default function AssetManager() {
@@ -254,6 +266,17 @@ export default function AssetManager() {
     store.assets.filter(a => a.clientId === clientId).sort((a, b) => a.order - b.order),
     [store.assets, clientId, refreshKey]
   );
+
+  /**
+   * Lista unica de classes de ativos (Renda Variavel + Fundos + Renda Fixa).
+   * Usada para validar o campo "Tipo" em qualquer via de preenchimento
+   * (sugestao do formulario, planilha de importacao, extrato BTG).
+   */
+  const uniqueAssetClasses = useMemo(
+    () => buildUniqueAssetClasses(store.rvPrices, store.fundosReferencia, store.rendasFixasReferencia),
+    [store.rvPrices, store.fundosReferencia, store.rendasFixasReferencia]
+  );
+
   const assets = useMemo(() => 
     clientAssets
       .filter(a => a.name.toLowerCase().includes(search.toLowerCase()) || (a.nomeExibicao ?? '').toLowerCase().includes(search.toLowerCase()))
@@ -346,7 +369,7 @@ const selectSuggestion = (s: DbSuggestion) => {
     setForm(prev => ({
       ...prev,
       name: s.name,
-      tipo: s.tipo ?? '',
+      tipo: s.tipo ? (matchAssetClass(s.tipo, uniqueAssetClasses) ?? '') : '',
       tickerCodigo: s.source === 'rv' ? (s.tickerCodigo ?? '') : '',
       cnpj: s.source === 'fundo' ? (s.cnpj ? formatCnpj(s.cnpj) : '') : '',
       precoUnitario: s.precoUnitario !== undefined ? String(s.precoUnitario) : '',
@@ -379,7 +402,7 @@ const openEdit = (asset: Asset) => {
     setForm({
       name: asset.name,
       nomeExibicao: asset.nomeExibicao ?? asset.name,
-      tipo: asset.tipo ?? '',
+      tipo: asset.tipo ? (matchAssetClass(asset.tipo, uniqueAssetClasses) ?? asset.tipo) : '',
       tickerCodigo: asset.tickerCodigo ?? '',
       cnpj: asset.cnpj ?? '',
       isin: asset.isin ?? '',
@@ -465,26 +488,34 @@ const handleSave = () => {
     setDeleteConfirm(null);
   };
 
+/**
+   * Exporta os ativos do cliente selecionado para planilha, no mesmo
+   * layout de 18 colunas do formulario de Novo Ativo (ver handleDownloadTemplate).
+   * Os campos automaticos (Tipo, Ticker, CNPJ, Codigo RF, Vencimento,
+   * Indexador) sao exportados como referencia/leitura — na reimportacao
+   * eles sao sempre recalculados a partir do Banco de Dados, nunca lidos
+   * de volta dessas colunas (ver handleImportFile).
+   */
   const handleExport = () => {
     const rows = clientAssets.map(asset => ({
       ID: asset.id,
       Nome: asset.name,
-      NomeExibicao: asset.nomeExibicao ?? asset.name,
-      Tipo: asset.tipo,
-      TickerCodigo: asset.tickerCodigo ?? '',
-      CNPJ: asset.cnpj ?? '',
-      ISIN: asset.isin ?? '',
-      IdentificadorExterno: asset.identificadorExterno ?? '',
-      Quantidade: asset.quantidade ?? '',
-      PrecoUnitario: asset.precoUnitario ?? '',
-      ValorPosicao: getAssetPositionValue(asset),
-      IsentoIR: asset.isentoIR ? 'sim' : 'nao',
-      Moeda: asset.moeda ?? 'BRL',
-      OrigemAtualizacao: asset.origemAtualizacao ?? 'manual',
+      'Nome exibicao': asset.nomeExibicao ?? asset.name,
       Estrategia: getStrategyName(asset.strategyId) ?? '',
       Subestrategia: getSubStrategyName(asset.subStrategyId) ?? '',
-      ModoMetaAtivo: asset.modoMetaAtivo ?? 'score',
-      ValorMetaAtivo: asset.valorMetaAtivo ?? 1,
+      'Modo meta ativo': asset.modoMetaAtivo ?? 'score',
+      'Valor meta ativo': asset.valorMetaAtivo ?? 1,
+      'Valor Posicao': getAssetPositionValue(asset),
+      'Isento de IR': asset.isentoIR ? 'sim' : 'nao',
+      Tipo: asset.tipo ?? '',
+      Quantidade: asset.quantidade ?? '',
+      'Preco Unitario': asset.precoUnitario ?? '',
+      'Ticker/Codigo': asset.tickerCodigo ?? '',
+      CNPJ: asset.cnpj ?? '',
+      'Codigo (Renda Fixa)': asset.identificadorExterno ?? '',
+      Vencimento: asset.dataVencimento ?? '',
+      Indexador: asset.tipoIndexador ?? '',
+      'Taxa Contratada': asset.taxaContratada ?? asset.spreadContratado ?? '',
     }));
 
     const wb = XLSX.utils.book_new();
@@ -492,59 +523,107 @@ const handleSave = () => {
     XLSX.writeFile(wb, `ativos_${store.selectedClient?.account ?? 'cliente'}_${new Date().toISOString().slice(0, 10)}.xlsx`);
   };
 
+/**
+   * Gera a planilha modelo para importacao de ativos.
+   *
+   * As 18 colunas espelham EXATAMENTE os campos do formulario de Novo
+   * Ativo (ver AssetForm). As colunas automaticas (Tipo, Ticker/Codigo,
+   * CNPJ, Codigo (Renda Fixa), Vencimento, Indexador) sao mostradas aqui
+   * so como exemplo/preview — na importacao real (handleImportFile) elas
+   * sao SEMPRE recalculadas a partir do Banco de Dados (catalogo), nunca
+   * lidas do texto que o usuario digitar nessas colunas. Isso evita que
+   * a planilha "force" um Tipo ou Ticker que nao existe de fato no
+   * catalogo de ativos do sistema.
+   */
   const handleDownloadTemplate = () => {
     const rows = [
+      // Exemplo 1: ativo "livre" (nao existe no Banco de Dados) — so os
+      // 8 campos base sao considerados, mesmo que outras colunas estejam
+      // preenchidas aqui no exemplo.
       {
         ID: '',
-        Nome: 'TESOURO SELIC 2029',
-        NomeExibicao: 'Tesouro Selic 2029',
-        Tipo: 'outro',
-        TickerCodigo: '',
-        CNPJ: '',
-        ISIN: 'BRTESOURO001',
-        IdentificadorExterno: '',
+        Nome: 'Carteira de criptoativos pessoal',
+        'Nome exibicao': 'Cripto pessoal',
+        Estrategia: 'Reserva de oportunidade',
+        Subestrategia: '',
+        'Modo meta ativo': 'score',
+        'Valor meta ativo': 5,
+        'Valor Posicao': 10000,
+        'Isento de IR': 'nao',
+        Tipo: '',
         Quantidade: '',
-        PrecoUnitario: '',
-        ValorPosicao: 10000,
-        IsentoIR: 'nao',
-        Moeda: 'BRL',
-        OrigemAtualizacao: 'manual',
-        Estrategia: 'Renda Fixa',
-        Subestrategia: 'Pos-fixado',
-        ModoMetaAtivo: 'score',
-        ValorMetaAtivo: 7,
+        'Preco Unitario': '',
+        'Ticker/Codigo': '',
+        CNPJ: '',
+        'Codigo (Renda Fixa)': '',
+        Vencimento: '',
+        Indexador: '',
+        'Taxa Contratada': '',
       },
+      // Exemplo 2: ativo de Renda Variavel — o nome deve bater com o
+      // Ticker/Codigo cadastrado no Banco de Dados (aba Renda Variavel).
       {
         ID: '',
         Nome: 'PETR4',
-        NomeExibicao: 'Petrobras PN',
-        Tipo: 'acao',
-        TickerCodigo: 'PETR4',
-        CNPJ: '',
-        ISIN: 'BRPETRACNPR6',
-        IdentificadorExterno: '',
-        Quantidade: 100,
-        PrecoUnitario: 35.5,
-        ValorPosicao: '',
-        IsentoIR: 'nao',
-        Moeda: 'BRL',
-        OrigemAtualizacao: 'importacao_excel',
+        'Nome exibicao': 'Petrobras PN',
         Estrategia: 'Renda Variavel',
         Subestrategia: 'Acoes',
-        ModoMetaAtivo: 'percentage',
-        ValorMetaAtivo: 25,
+        'Modo meta ativo': 'percentage',
+        'Valor meta ativo': 25,
+        'Valor Posicao': '',
+        'Isento de IR': 'nao',
+        Tipo: '',
+        Quantidade: 100,
+        'Preco Unitario': 35.5,
+        'Ticker/Codigo': '',
+        CNPJ: '',
+        'Codigo (Renda Fixa)': '',
+        Vencimento: '',
+        Indexador: '',
+        'Taxa Contratada': '',
+      },
+      // Exemplo 3: ativo de Renda Fixa — o nome deve bater com o Codigo
+      // Completo cadastrado no Banco de Dados (aba Renda Fixa). Taxa
+      // Contratada e o UNICO campo de RF preenchido manualmente aqui.
+      {
+        ID: '',
+        Nome: 'CDB BANCO XYZ 2029',
+        'Nome exibicao': 'CDB Banco XYZ',
+        Estrategia: 'Renda Fixa',
+        Subestrategia: 'Pos-fixado',
+        'Modo meta ativo': 'score',
+        'Valor meta ativo': 7,
+        'Valor Posicao': 10000,
+        'Isento de IR': 'nao',
+        Tipo: '',
+        Quantidade: '',
+        'Preco Unitario': '',
+        'Ticker/Codigo': '',
+        CNPJ: '',
+        'Codigo (Renda Fixa)': '',
+        Vencimento: '',
+        Indexador: '',
+        'Taxa Contratada': 102,
       },
     ];
 
     const instructions = [
       ['Campo', 'Obrigatorio', 'Descricao'],
-      ['Nome', 'Sim', 'Nome do ativo.'],
-      ['Tipo', 'Nao', 'acao, fii, etf, bdr, fundo, cdb, cri, cra, debenture, coe, cripto, conta_corrente, valores_em_transito, outro.'],
-      ['Quantidade/PrecoUnitario', 'Nao', 'Se ambos preenchidos, ValorPosicao = Quantidade x PrecoUnitario.'],
-      ['ValorPosicao', 'Nao', 'Usado quando quantidade/preco nao estiverem completos.'],
-      ['ID/IdentificadorExterno/ISIN/CNPJ/TickerCodigo', 'Nao', 'Usados para match de atualizacao nessa ordem de prioridade.'],
-      ['Estrategia/Subestrategia', 'Nao', 'Classificacao opcional.'],
-      ['ModoMetaAtivo/ValorMetaAtivo', 'Nao', 'score ou percentage para regra ideal do ativo.'],
+      ['ID', 'Nao', 'ID do ativo no sistema (gerado na exportacao). Se preenchido e encontrado, tem prioridade maxima: a linha sempre atualiza esse ativo.'],
+      ['Nome', 'Sim', 'Nome do ativo. E a chave de busca no Banco de Dados: compare com Ticker/Codigo (Renda Variavel), Nome do Fundo (Fundos) ou Codigo Completo (Renda Fixa). Se nao bater com nada, o ativo e criado como "livre", sem vinculo.'],
+      ['Nome exibicao', 'Nao', 'Nome livre, exibido nas telas do sistema no lugar do Nome.'],
+      ['Estrategia / Subestrategia', 'Nao', 'Classificacao do ativo na carteira do cliente.'],
+      ['Modo meta ativo / Valor meta ativo', 'Nao', 'score (nota 0 a 10) ou percentage (percentual direto da estrategia).'],
+      ['Valor Posicao', 'Nao', 'Usado quando Quantidade/Preco Unitario nao estiverem ambos preenchidos.'],
+      ['Isento de IR', 'Nao', 'sim ou nao.'],
+      ['Tipo', 'Nao - PREENCHIMENTO AUTOMATICO', 'Ignorado se a planilha tiver algo escrito aqui. E sempre preenchido pelo sistema a partir da Classe do ativo encontrado no Banco de Dados.'],
+      ['Quantidade / Preco Unitario', 'Nao', 'Dados da posicao do cliente. Livres mesmo para ativos vinculados ao catalogo.'],
+      ['Ticker/Codigo', 'Nao - PREENCHIMENTO AUTOMATICO', 'So usado, junto com o Nome, para localizar o ativo na Renda Variavel. O valor final gravado vem sempre do Banco de Dados.'],
+      ['CNPJ', 'Nao - PREENCHIMENTO AUTOMATICO', 'So usado, junto com o Nome, para localizar o ativo em Fundos de Investimento. O valor final gravado vem sempre do Banco de Dados.'],
+      ['Codigo (Renda Fixa)', 'Nao - PREENCHIMENTO AUTOMATICO', 'Nao e usado para buscar o ativo (so o Nome busca Renda Fixa). Preenchido automaticamente quando o Nome bate com um Codigo Completo do Banco de Dados.'],
+      ['Vencimento', 'Nao - PREENCHIMENTO AUTOMATICO', 'Preenchido automaticamente para ativos de Renda Fixa encontrados no Banco de Dados.'],
+      ['Indexador', 'Nao - PREENCHIMENTO AUTOMATICO', 'Preenchido automaticamente para ativos de Renda Fixa encontrados no Banco de Dados.'],
+      ['Taxa Contratada', 'Nao', 'UNICO campo de Renda Fixa preenchido pelo usuario. Numero simples (ex: 2 ou 0,3), referente a taxa ou ao spread contratado, conforme o Indexador do ativo.'],
     ];
 
     const wb = XLSX.utils.book_new();
@@ -555,7 +634,7 @@ const handleSave = () => {
 
   const handleImportClick = () => fileInputRef.current?.click();
 
-  const handleImportFile = async (event: ChangeEvent<HTMLInputElement>) => {
+const handleImportFile = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
 
@@ -579,7 +658,36 @@ const handleSave = () => {
           continue;
         }
 
-        const tipo = normalizeKey(String(normalized.tipo ?? 'outro')) || 'outro';
+        // ── 1. ID tem prioridade maxima: se a planilha trouxer um ID que
+        // ja existe na carteira do cliente, e sempre uma ATUALIZACAO desse
+        // ativo, independente do que mais a linha contenha.
+        const idFromSheet = String(normalized.id ?? '').trim();
+        const existingById = idFromSheet ? clientAssets.find(a => a.id === idFromSheet) : undefined;
+
+        // ── 2. Sem ID (ou ID nao encontrado), tenta achar o mesmo ativo
+        // ja cadastrado na carteira pelo nome (para nao duplicar quando o
+        // usuario reimporta a planilha exportada sem preencher o ID).
+        const existingByName = !existingById
+          ? clientAssets.find(a => normalizeKey(a.name) === normalizeKey(name))
+          : undefined;
+        const existing = existingById ?? existingByName;
+
+        // ── 3. Busca no Banco de Dados (catalogo) pelo Nome (e, como hint
+        // secundario, Ticker/CNPJ da propria planilha). So existe ativo
+        // "vinculado" quando ha match aqui — qualquer campo automatico
+        // (Tipo, Ticker, CNPJ, Codigo RF, Vencimento, Indexador) vem
+        // SEMPRE do catalogo, nunca do texto que estiver na planilha.
+        const tickerHint = String(normalized.tickercodigo ?? normalized.ticker ?? '').trim();
+        const cnpjHint = String(normalized.cnpj ?? '').trim();
+        const catalogMatch = findCatalogMatch(
+          name,
+          tickerHint,
+          cnpjHint,
+          store.rvPrices,
+          store.fundosReferencia,
+          store.rendasFixasReferencia,
+        );
+
         const qtd = parseSheetNumber(normalized.quantidade);
         const unit = parseSheetNumber(normalized.precounitario);
         const rawValor = parseSheetNumber(normalized.valorposicao ?? normalized.valor);
@@ -595,73 +703,63 @@ const handleSave = () => {
           ? getSubStrategies(strategyId).find(ss => normalizeKey(ss.name) === normalizeKey(subName))?.id
           : undefined;
 
-        const candidate = {
-          identificadorExterno: String(normalized.identificadorexterno ?? '').trim() || undefined,
-          isin: String(normalized.isin ?? '').trim() || undefined,
-          cnpj: String(normalized.cnpj ?? '').trim() || undefined,
-          tickerCodigo: String(normalized.tickercodigo ?? normalized.ticker ?? '').trim() || undefined,
-          name,
-        };
-
-        const existing = resolveAssetByPriority(clientAssets, candidate);
-
-        // Buscar referências no Banco de Dados
-        let referenciaRVId: string | undefined;
-        let referenciaFundoId: string | undefined;
-        let referenciaRFId: string | undefined;
-        const codigoRF = String(normalized.codigo ?? normalized.codigoativo ?? candidate.tickerCodigo ?? '').trim();
-
-        if (candidate.tickerCodigo) {
-          const rvMatch = store.rvPrices.find(r => r.tickerCodigo.toUpperCase() === candidate.tickerCodigo!.toUpperCase());
-          if (rvMatch) referenciaRVId = rvMatch.id;
-        }
-        if (candidate.cnpj) {
-          const fundoMatch = store.fundosReferencia.find(f => f.cnpjNumerico === candidate.cnpj!.replace(/\D/g, ''));
-          if (fundoMatch) referenciaFundoId = fundoMatch.id;
-        }
-        if (codigoRF) {
-          // Busca por Codigo Completo (prioridade) ou Codigo simples
-          const rfMatch = store.rendasFixasReferencia.find(r => {
-            if (r.codigoCompleto) {
-              return r.codigoCompleto.toUpperCase() === codigoRF.toUpperCase();
-            }
-            return r.codigo.toUpperCase() === codigoRF.toUpperCase();
-          });
-          if (rfMatch) referenciaRFId = rfMatch.id;
-        }
-
         const modeRaw = normalizeKey(String(normalized.modometaativo ?? 'score'));
         const modoMetaAtivo: AssetTargetMode = modeRaw === 'percentage' || modeRaw === 'percentual' ? 'percentage' : 'score';
         const valorMetaAtivo = parseSheetNumber(normalized.valormetaativo);
-        const isentoRaw = normalizeKey(String(normalized.isentoir ?? 'nao'));
+        const isentoRaw = normalizeKey(String(normalized.isentodeir ?? 'nao'));
         const isentoIR = ['sim', 'yes', 'true', '1'].includes(isentoRaw);
 
+        // ── 4. Campos base: sempre vem da planilha, existindo ou nao
+        // match no catalogo (sao os mesmos 8 campos de um "ativo livre").
         const payload: Partial<Omit<Asset, 'id' | 'clientId'>> = {
           name,
           nomeExibicao: String(normalized.nomeexibicao ?? name),
-          tipo,
-          tickerCodigo: candidate.tickerCodigo,
-          cnpj: candidate.cnpj,
-          isin: candidate.isin,
-          identificadorExterno: candidate.identificadorExterno,
-          referenciaRVId,
-          referenciaFundoId,
-          referenciaRFId,
-          quantidade: Number.isFinite(qtd) ? qtd : undefined,
-          precoUnitario: Number.isFinite(unit) ? unit : undefined,
           valorPosicao,
           currentValue: valorPosicao,
           isentoIR,
-          moeda: String(normalized.moeda ?? 'BRL') || 'BRL',
-          origemAtualizacao: (normalizeKey(String(normalized.origematualizacao ?? 'importacao_excel')) as AssetUpdateSource) || 'importacao_excel',
-          dataUltimaAtualizacao: new Date().toISOString(),
           strategyId,
           subStrategyId,
           modoMetaAtivo,
           valorMetaAtivo: Number.isFinite(valorMetaAtivo) ? valorMetaAtivo : 1,
           idealTargetMode: modoMetaAtivo,
           idealTargetValue: Number.isFinite(valorMetaAtivo) ? valorMetaAtivo : 1,
+          moeda: String(normalized.moeda ?? 'BRL') || 'BRL',
+          origemAtualizacao: (normalizeKey(String(normalized.origematualizacao ?? 'importacao_excel')) as AssetUpdateSource) || 'importacao_excel',
+          dataUltimaAtualizacao: new Date().toISOString(),
         };
+
+        if (catalogMatch) {
+          // ── 5a. Ativo VINCULADO ao catalogo: Tipo, Ticker, CNPJ, Codigo
+          // RF, Vencimento e Indexador vem do item encontrado — nunca do
+          // que a planilha trouxer nessas colunas. Quantidade e Preco
+          // Unitario continuam livres (sao dados da posicao do cliente,
+          // nao do ativo em si).
+          payload.tipo = catalogMatch.tipo || 'outro';
+          payload.referenciaRVId = catalogMatch.source === 'rv' ? catalogMatch.referenciaId : undefined;
+          payload.referenciaFundoId = catalogMatch.source === 'fundo' ? catalogMatch.referenciaId : undefined;
+          payload.referenciaRFId = catalogMatch.source === 'rf' ? catalogMatch.referenciaId : undefined;
+          payload.tickerCodigo = catalogMatch.source === 'rv' ? catalogMatch.tickerCodigo : undefined;
+          payload.cnpj = catalogMatch.source === 'fundo' ? catalogMatch.cnpj : undefined;
+          payload.identificadorExterno = catalogMatch.source === 'rf' ? catalogMatch.codigoRF : undefined;
+          payload.dataVencimento = catalogMatch.source === 'rf' ? catalogMatch.vencimentoRF : undefined;
+          payload.tipoIndexador = catalogMatch.source === 'rf' ? catalogMatch.tipoIndexadorRF : undefined;
+          payload.quantidade = Number.isFinite(qtd) ? qtd : undefined;
+          payload.precoUnitario = Number.isFinite(unit) ? unit : undefined;
+
+          // Taxa contratada: unico campo de Renda Fixa que e SEMPRE
+          // escolhido pelo usuario (planilha), nunca vem do catalogo.
+          if (catalogMatch.source === 'rf') {
+            const taxaContratadaNum = parseSheetNumber(normalized.taxacontratada);
+            payload.taxaContratada = Number.isFinite(taxaContratadaNum) ? taxaContratadaNum : undefined;
+          }
+        } else {
+          // ── 5b. Ativo LIVRE (sem match no catalogo): so os campos base
+          // contam. Tipo fica indefinido ("outro"), e nenhum campo
+          // automatico de RV/Fundo/RF e gravado, mesmo que a planilha
+          // tenha algo preenchido nessas colunas — evita a "aberracao"
+          // de um ativo livre carregar um Tipo ou Ticker inventado.
+          payload.tipo = 'outro';
+        }
 
         if (existing) {
           store.updateAsset(existing.id, payload);

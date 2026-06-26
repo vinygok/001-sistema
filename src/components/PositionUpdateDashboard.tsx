@@ -3,6 +3,7 @@ import { FileUp, CheckCircle2, AlertTriangle } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { buildPreviewRows, parseBtgWorkbook, type PreviewRow } from '../services/btgPositionImport';
 import { formatCurrency } from '../utils/portfolio';
+import { findCatalogMatch } from '../utils/assetClasses';
 
 interface ImportSummary {
   updated: number;
@@ -80,46 +81,68 @@ export default function PositionUpdateDashboard() {
         return;
       }
 
-      if (row.action === 'criar') {
-        // Buscar referências no Banco de Dados
-        let referenciaRVId: string | undefined;
-        let referenciaFundoId: string | undefined;
-        let referenciaRFId: string | undefined;
-        const codigoRF = row.codigo || row.ticker;
+if (row.action === 'criar') {
+        // Busca no Banco de Dados (catalogo) pelo nome reconhecido no
+        // extrato — mesma regra usada na importacao manual de planilha:
+        // RV por nome OU ticker; Fundos por nome OU CNPJ; Renda Fixa
+        // SOMENTE por nome (Codigo Completo).
+        const catalogMatch = findCatalogMatch(
+          row.importName,
+          row.ticker ?? '',
+          row.cnpj ?? '',
+          store.rvPrices,
+          store.fundosReferencia,
+          store.rendasFixasReferencia,
+        );
 
-        if (row.ticker) {
-          const rvMatch = store.rvPrices.find(r => r.tickerCodigo.toUpperCase() === row.ticker!.toUpperCase());
-          if (rvMatch) referenciaRVId = rvMatch.id;
+        if (catalogMatch) {
+          // Ativo VINCULADO: todo campo automatico vem do catalogo,
+          // nunca do que o extrato BTG "adivinhou" (row.suggestedType,
+          // row.ticker, row.cnpj, row.codigo).
+          store.addAsset(clientId, {
+            name: row.importName,
+            nomeExibicao: row.importName,
+            tipo: catalogMatch.tipo || 'outro',
+            tickerCodigo: catalogMatch.source === 'rv' ? catalogMatch.tickerCodigo : undefined,
+            cnpj: catalogMatch.source === 'fundo' ? catalogMatch.cnpj : undefined,
+            isin: undefined,
+            identificadorExterno: catalogMatch.source === 'rf' ? catalogMatch.codigoRF : undefined,
+            referenciaRVId: catalogMatch.source === 'rv' ? catalogMatch.referenciaId : undefined,
+            referenciaFundoId: catalogMatch.source === 'fundo' ? catalogMatch.referenciaId : undefined,
+            referenciaRFId: catalogMatch.source === 'rf' ? catalogMatch.referenciaId : undefined,
+            dataVencimento: catalogMatch.source === 'rf' ? catalogMatch.vencimentoRF : undefined,
+            tipoIndexador: catalogMatch.source === 'rf' ? catalogMatch.tipoIndexadorRF : undefined,
+            // Taxa contratada: unico campo de RF que vem do extrato
+            // (a mesma coluna usada para montar o nome do ativo),
+            // nunca do catalogo.
+            taxaContratada: catalogMatch.source === 'rf' ? row.taxaContratada : undefined,
+            valorPosicao: row.importValue,
+            currentValue: row.importValue,
+            moeda: 'BRL',
+            isentoIR: false,
+            origemAtualizacao: 'extrato_btg',
+            dataUltimaAtualizacao: referenceIso,
+            modoMetaAtivo: 'score',
+            valorMetaAtivo: 1,
+          });
+        } else {
+          // Ativo LIVRE: nao ha correspondencia no catalogo. So os
+          // campos base sao gravados — nenhum Tipo/Ticker/CNPJ/Codigo
+          // "adivinhado" pelo extrato e usado.
+          store.addAsset(clientId, {
+            name: row.importName,
+            nomeExibicao: row.importName,
+            tipo: 'outro',
+            valorPosicao: row.importValue,
+            currentValue: row.importValue,
+            moeda: 'BRL',
+            isentoIR: false,
+            origemAtualizacao: 'extrato_btg',
+            dataUltimaAtualizacao: referenceIso,
+            modoMetaAtivo: 'score',
+            valorMetaAtivo: 1,
+          });
         }
-        if (row.cnpj) {
-          const fundoMatch = store.fundosReferencia.find(f => f.cnpjNumerico === row.cnpj!.replace(/\D/g, ''));
-          if (fundoMatch) referenciaFundoId = fundoMatch.id;
-        }
-        if (codigoRF && (row.suggestedType === 'cdb' || row.suggestedType === 'cri' || row.suggestedType === 'cra' || row.suggestedType === 'debenture' || row.suggestedType === 'coe')) {
-          const rfMatch = store.rendasFixasReferencia.find(r => r.codigo.toUpperCase() === codigoRF.toUpperCase());
-          if (rfMatch) referenciaRFId = rfMatch.id;
-        }
-
-        store.addAsset(clientId, {
-          name: row.importName,
-          nomeExibicao: row.importName,
-          tipo: row.suggestedType,
-          tickerCodigo: row.ticker,
-          cnpj: row.cnpj,
-          isin: undefined,
-          identificadorExterno: row.codigo || row.externalId,
-          referenciaRVId,
-          referenciaFundoId,
-          referenciaRFId,
-          valorPosicao: row.importValue,
-          currentValue: row.importValue,
-          moeda: 'BRL',
-          isentoIR: false,
-          origemAtualizacao: 'extrato_btg',
-          dataUltimaAtualizacao: referenceIso,
-          modoMetaAtivo: 'score',
-          valorMetaAtivo: 1,
-        });
         created += 1;
       }
     });
