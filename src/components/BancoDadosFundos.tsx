@@ -182,6 +182,21 @@ export default function BancoDadosFundos() {
     );
   }, [fundos, search]);
 
+  // --- LÓGICA DE PAGINAÇÃO ---
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 50;
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [search]);
+
+  const totalPages = Math.ceil(filteredFundos.length / itemsPerPage);
+  const paginatedFundos = useMemo(() => {
+    const start = (currentPage - 1) * itemsPerPage;
+    return filteredFundos.slice(start, start + itemsPerPage);
+  }, [filteredFundos, currentPage]);
+  // ---------------------------
+
   const openAdd = () => {
     setForm(emptyForm);
     setEditingId(null);
@@ -406,19 +421,23 @@ export default function BancoDadosFundos() {
     let atualizados = 0;
     for (const fundo of fundos) {
       if (!fundo.ativo || fundo.cotaAtual === undefined) continue;
+      
+      // Crava ao meio-dia UTC (T12:00:00.000Z) para blindar contra o fuso horário (UTC-3 Brasil)
+      const dataOficialCota = fundo.dataCota ? `${fundo.dataCota}T12:00:00.000Z` : now;
+
       const ativosRelacionados = store.assets.filter(a => a.referenciaFundoId === fundo.id);
       for (const asset of ativosRelacionados) {
         const quantidade = asset.quantidade ?? 0;
         store.updateAsset(asset.id, {
           precoUnitario: fundo.cotaAtual,
           valorPosicao: quantidade * fundo.cotaAtual,
-          dataUltimaAtualizacao: now,
+          dataUltimaAtualizacao: dataOficialCota,
           origemAtualizacao: 'api',
         });
         atualizados += 1;
       }
     }
-    addToast(`Preços aplicados em ${atualizados} ativo(s).`, 'success');
+    addToast(`Preços aplicados em ${atualizados} ativo(s) com a data da cota.`, 'success');
   };
 
   const handleImportClick = () => {
@@ -656,7 +675,7 @@ export default function BancoDadosFundos() {
                   </td>
                 </tr>
               )}
-              {filteredFundos.map(fundo => (
+              {paginatedFundos.map(fundo => (
                 <tr key={fundo.id} className="border-b border-gray-100 hover:bg-gray-50">
                   <td className="px-3 py-2 text-sm text-gray-800">
                     <div className="font-medium">{fundo.nomeAbreviado || fundo.nomeCompleto}</div>
@@ -718,11 +737,30 @@ export default function BancoDadosFundos() {
           </table>
         </div>
 
-        <div className="flex items-center justify-between px-4 py-3 bg-gray-50 border-t border-gray-100 text-xs text-gray-600">
-          <div className="flex items-center gap-4">
+        <div className="flex items-center justify-between gap-4 flex-wrap px-4 py-3 bg-gray-50 border-t border-gray-100 text-xs text-gray-600">
+          <div className="flex items-center gap-4 flex-wrap">
             <span>Total: <strong>{totalFundos}</strong> fundo(s)</span>
             <span>Ativos: <strong>{ativosCount}</strong></span>
             <span>Inativos: <strong>{inativosCount}</strong></span>
+            {totalPages > 1 && (
+              <div className="flex items-center gap-2 pl-4 border-l border-gray-200">
+                <span className="font-medium">Página {currentPage} de {totalPages}</span>
+                <button
+                  onClick={() => setCurrentPage(p => Math.max(p - 1, 1))}
+                  disabled={currentPage === 1}
+                  className="px-2.5 py-1 border border-gray-300 rounded bg-white text-gray-700 hover:bg-gray-100 disabled:opacity-40 disabled:pointer-events-none transition-colors"
+                >
+                  Anterior
+                </button>
+                <button
+                  onClick={() => setCurrentPage(p => Math.min(p + 1, totalPages))}
+                  disabled={currentPage === totalPages}
+                  className="px-2.5 py-1 border border-gray-300 rounded bg-white text-gray-700 hover:bg-gray-100 disabled:opacity-40 disabled:pointer-events-none transition-colors"
+                >
+                  Próxima
+                </button>
+              </div>
+            )}
           </div>
           <div>
             Última atualização de cotas: {lastUpdate || '—'}

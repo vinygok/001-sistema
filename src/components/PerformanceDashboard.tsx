@@ -9,6 +9,24 @@ function ResultCell({ value, money = true }: { value: number; money?: boolean })
   return <span className={color}>{money ? formatCurrency(value) : value.toFixed(2)}</span>;
 }
 
+function CdiRelativeCell({ value, isTotal = false }: { value?: number; isTotal?: boolean }) {
+  // 1. Se for inválido ou menor/igual a 0: retorna traço "--"
+  if (value === undefined || !Number.isFinite(value) || value <= 0) {
+    return <td className={`px-2 py-2 text-xs text-right ${isTotal ? 'text-white' : 'text-gray-400'}`}>--</td>;
+  }
+
+  // 2. Se for maior que 0 e menor que 50% (0.50): pinta de vermelho
+  if (value > 0 && value < 0.50) {
+    return <td className="px-2 py-2 text-xs text-right text-red-600 font-medium">{formatPctDecimal(value)}</td>;
+  }
+  // 3. Se for maior ou igual a 50% e menor que 98% (0.98): pinta de laranja (#F79646)
+  if (value >= 0.50 && value < 0.98) {
+    return <td className="px-2 py-2 text-xs text-right font-medium" style={{ color: '#F79646' }}>{formatPctDecimal(value)}</td>;
+  }
+  // 4. Se for entre maior que 98% do CDI: cor verde
+  return <td className={`px-2 py-2 text-xs text-right font-medium ${isTotal ? 'text-emerald-400' : 'text-emerald-700'}`}>{formatPctDecimal(value)}</td>;
+}
+
 export default function PerformanceDashboard() {
   const store = useStore();
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -75,7 +93,7 @@ export default function PerformanceDashboard() {
         <td className={td}><ResultCell value={row.totalReturn} /></td>
         <td className={td}>{formatPctDecimal(row.annualIrr)}</td>
         <td className={td}>{formatPctDecimal(row.cdiAnnual)}</td>
-        <td className={`${td} ${row.cdiRelative !== undefined && row.cdiRelative < 1 ? 'text-red-600' : 'text-emerald-700'}`}>{formatPctDecimal(row.cdiRelative)}</td>
+        <CdiRelativeCell value={row.cdiRelative} />
       </tr>,
       ...(isOpen ? children.flatMap(child => renderRow(child, level + 1)) : []),
     ];

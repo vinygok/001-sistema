@@ -108,24 +108,51 @@ function movementToSignedAppliedValue(movement: AssetMovement): number {
   }
 }
 
+/**
+ * Busca binária para encontrar o índice acumulado do CDI na data exata ou anterior mais próxima.
+ * Reduz a complexidade de O(N log N) para O(log N).
+ */
 function getCdiIndexOnOrBefore(cdiRates: CdiRate[], date: string): number | undefined {
-  const sorted = [...cdiRates].sort((a, b) => a.data.localeCompare(b.data));
-  let index: number | undefined;
-  for (const row of sorted) {
-    if (row.data <= date) index = row.indiceAcumulado;
-    else break;
+  if (cdiRates.length === 0) return undefined;
+  
+  let low = 0;
+  let high = cdiRates.length - 1;
+  let resultIndex = -1;
+
+  while (low <= high) {
+    const mid = (low + high) >>> 1;
+    if (cdiRates[mid].data <= date) {
+      resultIndex = mid;
+      low = mid + 1; // Tenta encontrar uma data mais próxima ainda
+    } else {
+      high = mid - 1;
+    }
   }
-  return index;
+
+  return resultIndex >= 0 ? cdiRates[resultIndex].indiceAcumulado : undefined;
 }
 
+/**
+ * Busca binária para encontrar o índice acumulado do CDI estritamente anterior à data.
+ */
 function getCdiIndexBefore(cdiRates: CdiRate[], date: string): number | undefined {
-  const sorted = [...cdiRates].sort((a, b) => a.data.localeCompare(b.data));
-  let index: number | undefined;
-  for (const row of sorted) {
-    if (row.data < date) index = row.indiceAcumulado;
-    else break;
+  if (cdiRates.length === 0) return undefined;
+  
+  let low = 0;
+  let high = cdiRates.length - 1;
+  let resultIndex = -1;
+
+  while (low <= high) {
+    const mid = (low + high) >>> 1;
+    if (cdiRates[mid].data < date) {
+      resultIndex = mid;
+      low = mid + 1;
+    } else {
+      high = mid - 1;
+    }
   }
-  return index;
+
+  return resultIndex >= 0 ? cdiRates[resultIndex].indiceAcumulado : undefined;
 }
 
 function groupFlowsByDate(rows: Array<{ date: string; amount: number }>): CashFlow[] {
@@ -169,6 +196,10 @@ function getIrRate(days: number, brackets: IrBracket[]): number {
   const bracket = brackets.find(b => days >= b.diasDe && (b.diasAte === undefined || days <= b.diasAte));
   return (bracket?.aliquota ?? 0) / 100;
 }
+
+// ============================================================================
+// SUBSTITUA A FUNÇÃO buildSyntheticRows POR ESTA (COM CACHE DE BUSCAS):
+// ============================================================================
 
 function buildSyntheticRows(
   assets: Asset[],

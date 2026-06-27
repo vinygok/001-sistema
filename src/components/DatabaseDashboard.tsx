@@ -160,6 +160,34 @@ export default function DatabaseDashboard() {
     [store.rvPrices]
   );
 
+  // --- LÓGICA DE PAGINAÇÃO DAS TABELAS GLOBAIS ---
+  const [cdiPage, setCdiPage] = useState(1);
+  const [holidayPage, setHolidayPage] = useState(1);
+  const [rvPage, setRvPage] = useState(1);
+  const itemsPerPageGlobal = 100; // 100 itens por página em cada tabela
+
+  // Paginação CDI
+  const cdiTotalPages = Math.ceil(cdiRows.length / itemsPerPageGlobal);
+  const paginatedCdiRows = useMemo(() => {
+    const start = (cdiPage - 1) * itemsPerPageGlobal;
+    return cdiRows.slice(start, start + itemsPerPageGlobal);
+  }, [cdiRows, cdiPage]);
+
+  // Paginação Feriados
+  const holidayTotalPages = Math.ceil(holidayRows.length / itemsPerPageGlobal);
+  const paginatedHolidayRows = useMemo(() => {
+    const start = (holidayPage - 1) * itemsPerPageGlobal;
+    return holidayRows.slice(start, start + itemsPerPageGlobal);
+  }, [holidayRows, holidayPage]);
+
+  // Paginação RV
+  const rvTotalPages = Math.ceil(rvRows.length / itemsPerPageGlobal);
+  const paginatedRvRows = useMemo(() => {
+    const start = (rvPage - 1) * itemsPerPageGlobal;
+    return rvRows.slice(start, start + itemsPerPageGlobal);
+  }, [rvRows, rvPage]);
+  // -----------------------------------------------
+
   const replaceCdiRows = (rows: Array<{ data: string; taxaDiaria: number; taxaDecimal: number }>) => {
     const dedup = new Map<string, { data: string; taxaDiaria: number; taxaDecimal: number }>();
     for (const row of rows) {
@@ -659,7 +687,7 @@ export default function DatabaseDashboard() {
                       <td colSpan={5} className="px-3 py-8 text-center text-sm text-gray-400">Nenhum registro CDI cadastrado.</td>
                     </tr>
                   )}
-                  {cdiRows.map(row => {
+                  {paginatedCdiRows.map(row => {
                     const editing = editingDate === row.data;
                     return (
                       <tr key={row.data} className="border-b border-gray-100 hover:bg-gray-50">
@@ -698,6 +726,15 @@ export default function DatabaseDashboard() {
                 </tbody>
               </table>
             </div>
+            {cdiTotalPages > 1 && (
+              <div className="px-4 py-3 bg-gray-50 border-t border-gray-100 flex items-center justify-between text-xs text-gray-600">
+                <span>Mostrando página <strong>{cdiPage}</strong> de <strong>{cdiTotalPages}</strong> ({cdiRows.length} taxas no total)</span>
+                <div className="flex items-center gap-2">
+                  <button onClick={() => setCdiPage(p => Math.max(p - 1, 1))} disabled={cdiPage === 1} className="px-2.5 py-1 border border-gray-300 rounded bg-white text-gray-700 hover:bg-gray-100 disabled:opacity-40 disabled:pointer-events-none transition-colors">Anterior</button>
+                  <button onClick={() => setCdiPage(p => Math.min(p + 1, cdiTotalPages))} disabled={cdiPage === cdiTotalPages} className="px-2.5 py-1 border border-gray-300 rounded bg-white text-gray-700 hover:bg-gray-100 disabled:opacity-40 disabled:pointer-events-none transition-colors">Próxima</button>
+                </div>
+              </div>
+            )}
           </div>
         </>
       )}
@@ -792,7 +829,7 @@ export default function DatabaseDashboard() {
                       <td colSpan={4} className="px-3 py-8 text-center text-sm text-gray-400">Nenhum feriado ANBIMA importado.</td>
                     </tr>
                   )}
-                  {holidayRows.map(row => {
+                  {paginatedHolidayRows.map(row => {
                     const editing = editingHolidayId === row.id;
                     return (
                       <tr key={row.id} className="border-b border-gray-100 hover:bg-gray-50">
@@ -824,6 +861,15 @@ export default function DatabaseDashboard() {
                 </tbody>
               </table>
             </div>
+            {holidayTotalPages > 1 && (
+              <div className="px-4 py-3 bg-gray-50 border-t border-gray-100 flex items-center justify-between text-xs text-gray-600">
+                <span>Mostrando página <strong>{holidayPage}</strong> de <strong>{holidayTotalPages}</strong> ({holidayRows.length} feriados no total)</span>
+                <div className="flex items-center gap-2">
+                  <button onClick={() => setHolidayPage(p => Math.max(p - 1, 1))} disabled={holidayPage === 1} className="px-2.5 py-1 border border-gray-300 rounded bg-white text-gray-700 hover:bg-gray-100 disabled:opacity-40 disabled:pointer-events-none transition-colors">Anterior</button>
+                  <button onClick={() => setHolidayPage(p => Math.min(p + 1, holidayTotalPages))} disabled={holidayPage === holidayTotalPages} className="px-2.5 py-1 border border-gray-300 rounded bg-white text-gray-700 hover:bg-gray-100 disabled:opacity-40 disabled:pointer-events-none transition-colors">Próxima</button>
+                </div>
+              </div>
+            )}
           </div>
         </>
       )}
@@ -907,7 +953,7 @@ export default function DatabaseDashboard() {
                       <td colSpan={5} className="px-3 py-8 text-center text-sm text-gray-400">Nenhum preco de renda variavel cadastrado.</td>
                     </tr>
                   )}
-                  {rvRows.map(row => {
+                  {paginatedRvRows.map(row => {
                     const editing = editingRvId === row.id;
                     return (
                       <tr key={row.id} className="border-b border-gray-100 hover:bg-gray-50">
@@ -950,6 +996,15 @@ export default function DatabaseDashboard() {
                 </tbody>
               </table>
           </div>
+          {rvTotalPages > 1 && (
+            <div className="px-4 py-3 bg-gray-50 border-t border-gray-100 flex items-center justify-between text-xs text-gray-600">
+              <span>Mostrando página <strong>{rvPage}</strong> de <strong>{rvTotalPages}</strong> ({rvRows.length} ativos no total)</span>
+              <div className="flex items-center gap-2">
+                <button onClick={() => setRvPage(p => Math.max(p - 1, 1))} disabled={rvPage === 1} className="px-2.5 py-1 border border-gray-300 rounded bg-white text-gray-700 hover:bg-gray-100 disabled:opacity-40 disabled:pointer-events-none transition-colors">Anterior</button>
+                <button onClick={() => setRvPage(p => Math.min(p + 1, rvTotalPages))} disabled={rvPage === rvTotalPages} className="px-2.5 py-1 border border-gray-300 rounded bg-white text-gray-700 hover:bg-gray-100 disabled:opacity-40 disabled:pointer-events-none transition-colors">Próxima</button>
+              </div>
+            </div>
+          )}
         </div>
         </>
       )}

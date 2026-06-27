@@ -36,8 +36,14 @@ import type {
   RendaFixaReferencia,
 } from '../types';
 
-// Chave usada para persistência no localStorage
-const STORAGE_KEY = 'investment_portfolio_v1';
+// Chaves desmembradas para persistência de alta performance
+const STORAGE_KEY_MAIN     = 'portfolio_main_v2';
+const STORAGE_KEY_CDI      = 'portfolio_cdi_v2';
+const STORAGE_KEY_HOLIDAYS = 'portfolio_holidays_v2';
+const STORAGE_KEY_RV       = 'portfolio_rv_v2';
+const STORAGE_KEY_FUNDOS   = 'portfolio_fundos_v2';
+const STORAGE_KEY_RF       = 'portfolio_rf_v2';
+const LEGACY_STORAGE_KEY   = 'investment_portfolio_v1';
 
 /** Formato completo dos dados armazenados */
 interface StoreData {
@@ -83,18 +89,82 @@ const defaultData: StoreData = {
 };
 
 /**
- * Carrega os dados do localStorage e aplica migrações necessárias
- * para garantir compatibilidade com versões anteriores do schema.
+ * Carrega os dados do localStorage e aplica migrações necessárias.
+ * Suporta migração automática e transparente do modelo antigo (v1) para o novo (v2).
  */
 function loadData(): StoreData {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return defaultData;
+    let mainData: Partial<StoreData> = {};
+    let cdiRates: CdiRate[] = [];
+    let anbimaHolidays: AnbimaHoliday[] = [];
+    let rvPrices: RendaVariavelPrice[] = [];
+    let fundosReferencia: FundoReferencia[] = [];
+    let rendasFixasReferencia: RendaFixaReferencia[] = [];
 
-    const parsed = { ...defaultData, ...JSON.parse(raw) } as StoreData;
+    // 1. Verifica se já existe a estrutura v2 separada
+    const rawMain = localStorage.getItem(STORAGE_KEY_MAIN);
+    if (rawMain) {
+      mainData = JSON.parse(rawMain);
+      
+      const rawCdi = localStorage.getItem(STORAGE_KEY_CDI);
+      if (rawCdi) cdiRates = JSON.parse(rawCdi);
+
+      const rawHolidays = localStorage.getItem(STORAGE_KEY_HOLIDAYS);
+      if (rawHolidays) anbimaHolidays = JSON.parse(rawHolidays);
+
+      const rawRv = localStorage.getItem(STORAGE_KEY_RV);
+      if (rawRv) rvPrices = JSON.parse(rawRv);
+
+      const rawFundos = localStorage.getItem(STORAGE_KEY_FUNDOS);
+      if (rawFundos) fundosReferencia = JSON.parse(rawFundos);
+
+      const rawRf = localStorage.getItem(STORAGE_KEY_RF);
+      if (rawRf) rendasFixasReferencia = JSON.parse(rawRf);
+    } else {
+      // 2. MIGRAÇÃO TRANSPARENTE DA V1 PARA V2 (evita perda de dados do usuário)
+      const rawLegacy = localStorage.getItem(LEGACY_STORAGE_KEY);
+      if (rawLegacy) {
+        const legacyParsed = JSON.parse(rawLegacy) as StoreData;
+        mainData = {
+          clients: legacyParsed.clients,
+          strategies: legacyParsed.strategies,
+          subStrategies: legacyParsed.subStrategies,
+          assets: legacyParsed.assets,
+          assetMovements: legacyParsed.assetMovements,
+          irBrackets: legacyParsed.irBrackets,
+          draftNotes: legacyParsed.draftNotes,
+          selectedClientId: legacyParsed.selectedClientId,
+        };
+        cdiRates = legacyParsed.cdiRates ?? [];
+        anbimaHolidays = legacyParsed.anbimaHolidays ?? [];
+        rvPrices = legacyParsed.rvPrices ?? [];
+        fundosReferencia = legacyParsed.fundosReferencia ?? [];
+        rendasFixasReferencia = legacyParsed.rendasFixasReferencia ?? [];
+
+        // Salva na nova estrutura v2 imediatamente
+        try {
+          localStorage.setItem(STORAGE_KEY_MAIN, JSON.stringify(mainData));
+          localStorage.setItem(STORAGE_KEY_CDI, JSON.stringify(cdiRates));
+          localStorage.setItem(STORAGE_KEY_HOLIDAYS, JSON.stringify(anbimaHolidays));
+          localStorage.setItem(STORAGE_KEY_RV, JSON.stringify(rvPrices));
+          localStorage.setItem(STORAGE_KEY_FUNDOS, JSON.stringify(fundosReferencia));
+          localStorage.setItem(STORAGE_KEY_RF, JSON.stringify(rendasFixasReferencia));
+        } catch {}
+      }
+    }
+
+    const merged: StoreData = {
+      ...defaultData,
+      ...mainData,
+      cdiRates,
+      anbimaHolidays,
+      rvPrices,
+      fundosReferencia,
+      rendasFixasReferencia,
+    };
 
     // Migração de assets: garante que campos novos existam em registros antigos
-    const migratedAssets = parsed.assets.map((asset): Asset => {
+    const migratedAssets = merged.assets.map((asset): Asset => {
       const currentValue = asset.valorPosicao ?? asset.currentValue ?? 0;
       return {
         ...asset,
@@ -112,27 +182,75 @@ function loadData(): StoreData {
     });
 
     return {
-      ...parsed,
+      ...merged,
       assets:                  migratedAssets,
-      assetMovements:          parsed.assetMovements          ?? [],
-      cdiRates:                parsed.cdiRates                ?? [],
-      irBrackets:              parsed.irBrackets?.length ? parsed.irBrackets : defaultData.irBrackets,
-      anbimaHolidays:          parsed.anbimaHolidays          ?? [],
-      rvPrices:                parsed.rvPrices                ?? [],
-      fundosReferencia:        parsed.fundosReferencia        ?? [],
-      rendasFixasReferencia:   parsed.rendasFixasReferencia   ?? [],
+      assetMovements:          merged.assetMovements          ?? [],
+      cdiRates:                merged.cdiRates                ?? [],
+      irBrackets:              merged.irBrackets?.length ? merged.irBrackets : defaultData.irBrackets,
+      anbimaHolidays:          merged.anbimaHolidays          ?? [],
+      rvPrices:                merged.rvPrices                ?? [],
+      fundosReferencia:        merged.fundosReferencia        ?? [],
+      rendasFixasReferencia:   merged.rendasFixasReferencia   ?? [],
     };
   } catch {
     return defaultData;
   }
 }
 
-/** Persiste os dados no localStorage (erros silenciosos para não travar a UI) */
-function saveData(data: StoreData): void {
+/** 
+ * Persiste os dados de forma inteligente (Smart Persistence):
+ * Compara as referências em memória e salva APENAS os pedaços que mudaram.
+ * Elimina o travamento ao digitar ou alterar posições.
+ */
+function saveData(next: StoreData, prev?: StoreData): void {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+    // 1. Verifica se algo do Main (clientes, estratégias, carteiras, notas) mudou
+    const mainChanged = !prev ||
+      next.clients !== prev.clients ||
+      next.strategies !== prev.strategies ||
+      next.subStrategies !== prev.subStrategies ||
+      next.assets !== prev.assets ||
+      next.assetMovements !== prev.assetMovements ||
+      next.irBrackets !== prev.irBrackets ||
+      next.draftNotes !== prev.draftNotes ||
+      next.selectedClientId !== prev.selectedClientId;
+
+    if (mainChanged) {
+      const mainData = {
+        clients: next.clients,
+        strategies: next.strategies,
+        subStrategies: next.subStrategies,
+        assets: next.assets,
+        assetMovements: next.assetMovements,
+        irBrackets: next.irBrackets,
+        draftNotes: next.draftNotes,
+        selectedClientId: next.selectedClientId,
+      };
+      localStorage.setItem(STORAGE_KEY_MAIN, JSON.stringify(mainData));
+    }
+
+    // 2. Bancos de Dados Globais (salva apenas se o respectivo catálogo mudou)
+    if (!prev || next.cdiRates !== prev.cdiRates) {
+      localStorage.setItem(STORAGE_KEY_CDI, JSON.stringify(next.cdiRates));
+    }
+
+    if (!prev || next.anbimaHolidays !== prev.anbimaHolidays) {
+      localStorage.setItem(STORAGE_KEY_HOLIDAYS, JSON.stringify(next.anbimaHolidays));
+    }
+
+    if (!prev || next.rvPrices !== prev.rvPrices) {
+      localStorage.setItem(STORAGE_KEY_RV, JSON.stringify(next.rvPrices));
+    }
+
+    if (!prev || next.fundosReferencia !== prev.fundosReferencia) {
+      localStorage.setItem(STORAGE_KEY_FUNDOS, JSON.stringify(next.fundosReferencia));
+    }
+
+    if (!prev || next.rendasFixasReferencia !== prev.rendasFixasReferencia) {
+      localStorage.setItem(STORAGE_KEY_RF, JSON.stringify(next.rendasFixasReferencia));
+    }
   } catch {
-    // Sem ação — pode ocorrer em modo privado com storage cheio
+    // Erro silencioso (ex: modo privado com storage cheio)
   }
 }
 
@@ -173,12 +291,13 @@ function notify(): void {
 }
 
 /**
- * Atualiza o estado global, persiste no localStorage e notifica os listeners.
+ * Atualiza o estado global, persiste de forma seletiva no localStorage e notifica os listeners.
  * @param updater Função pura que recebe o estado atual e retorna o novo estado
  */
 function updateStore(updater: (prev: StoreData) => StoreData): void {
+  const prevData = storeData;
   storeData = updater(storeData);
-  saveData(storeData);
+  saveData(storeData, prevData);
   notify();
 }
 

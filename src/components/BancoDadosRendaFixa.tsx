@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState, type ChangeEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
 import { Search, Plus, Calculator, Edit2, Trash2, Save, AlertTriangle, Info, Check, Upload, Download } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { useStore } from '../store/useStore';
@@ -249,6 +249,7 @@ export default function BancoDadosRendaFixa() {
       .filter(r => {
         const bySearch = !term
           || r.codigo.toLowerCase().includes(term)
+          || (r.codigoCompleto?.toLowerCase() ?? '').includes(term) // <--- Adicionado busca pelo Código Completo
           || r.emissor.toLowerCase().includes(term)
           || CLASSE_LABEL[r.classe as RfClasse]?.toLowerCase().includes(term);
         const byClasse = classeFilter === 'all' || r.classe === classeFilter;
@@ -257,6 +258,22 @@ export default function BancoDadosRendaFixa() {
       })
       .sort((a, b) => a.codigo.localeCompare(b.codigo));
   }, [store.rendasFixasReferencia, search, classeFilter, indexFilter]);
+
+  // --- LÓGICA DE PAGINAÇÃO ---
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 100; // Exibe 100 itens por página
+
+  // Se o usuário pesquisar ou filtrar, volta para a página 1
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [search, classeFilter, indexFilter]);
+
+  const totalPages = Math.ceil(rows.length / itemsPerPage);
+  const paginatedRows = useMemo(() => {
+    const start = (currentPage - 1) * itemsPerPage;
+    return rows.slice(start, start + itemsPerPage);
+  }, [rows, currentPage]);
+  // ---------------------------
 
   const openAdd = () => {
     setEditingId(null);
@@ -745,7 +762,7 @@ export default function BancoDadosRendaFixa() {
                   <td colSpan={8} className="px-3 py-8 text-center text-sm text-gray-400">Nenhum titulo de renda fixa cadastrado.</td>
                 </tr>
               )}
-              {rows.map(row => {
+              {paginatedRows.map(row => {
                 const tone = getVencimentoTone(row.vencimento);
                 return (
                   <tr key={row.id} className="border-b border-gray-100 hover:bg-gray-50">
@@ -789,8 +806,29 @@ export default function BancoDadosRendaFixa() {
           </table>
         </div>
 
-        <div className="px-4 py-3 bg-gray-50 border-t border-gray-100 text-xs text-gray-600">
-          Total: {total} titulos | CDB: {cdbCount} | CRI: {criCount} | CRA: {craCount} | Debenture: {debCount} | COE: {coeCount}
+        <div className="px-4 py-3 bg-gray-50 border-t border-gray-100 flex items-center justify-between gap-4 flex-wrap text-xs text-gray-600">
+          <div>
+            Total: {total} titulos | CDB: {cdbCount} | CRI: {criCount} | CRA: {craCount} | Debenture: {debCount} | COE: {coeCount}
+          </div>
+          {totalPages > 1 && (
+            <div className="flex items-center gap-2">
+              <span className="font-medium">Página {currentPage} de {totalPages}</span>
+              <button
+                onClick={() => setCurrentPage(p => Math.max(p - 1, 1))}
+                disabled={currentPage === 1}
+                className="px-2.5 py-1 border border-gray-300 rounded bg-white text-gray-700 hover:bg-gray-100 disabled:opacity-40 disabled:pointer-events-none transition-colors"
+              >
+                Anterior
+              </button>
+              <button
+                onClick={() => setCurrentPage(p => Math.min(p + 1, totalPages))}
+                disabled={currentPage === totalPages}
+                className="px-2.5 py-1 border border-gray-300 rounded bg-white text-gray-700 hover:bg-gray-100 disabled:opacity-40 disabled:pointer-events-none transition-colors"
+              >
+                Próxima
+              </button>
+            </div>
+          )}
         </div>
       </div>
 

@@ -1,5 +1,5 @@
 # SNAPSHOT CODIGO
-# Gerado em: 2026-06-26T16:31:16.275Z
+# Gerado em: 2026-06-27T19:53:16.819Z
 # Total de arquivos: 34
 
 ===== BEGIN FILE: index.html =====
@@ -5222,6 +5222,21 @@ export default function BancoDadosFundos() {
     );
   }, [fundos, search]);
 
+  // --- LÓGICA DE PAGINAÇÃO ---
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 50;
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [search]);
+
+  const totalPages = Math.ceil(filteredFundos.length / itemsPerPage);
+  const paginatedFundos = useMemo(() => {
+    const start = (currentPage - 1) * itemsPerPage;
+    return filteredFundos.slice(start, start + itemsPerPage);
+  }, [filteredFundos, currentPage]);
+  // ---------------------------
+
   const openAdd = () => {
     setForm(emptyForm);
     setEditingId(null);
@@ -5446,19 +5461,23 @@ export default function BancoDadosFundos() {
     let atualizados = 0;
     for (const fundo of fundos) {
       if (!fundo.ativo || fundo.cotaAtual === undefined) continue;
+      
+      // Crava ao meio-dia UTC (T12:00:00.000Z) para blindar contra o fuso horário (UTC-3 Brasil)
+      const dataOficialCota = fundo.dataCota ? `${fundo.dataCota}T12:00:00.000Z` : now;
+
       const ativosRelacionados = store.assets.filter(a => a.referenciaFundoId === fundo.id);
       for (const asset of ativosRelacionados) {
         const quantidade = asset.quantidade ?? 0;
         store.updateAsset(asset.id, {
           precoUnitario: fundo.cotaAtual,
           valorPosicao: quantidade * fundo.cotaAtual,
-          dataUltimaAtualizacao: now,
+          dataUltimaAtualizacao: dataOficialCota,
           origemAtualizacao: 'api',
         });
         atualizados += 1;
       }
     }
-    addToast(`Preços aplicados em ${atualizados} ativo(s).`, 'success');
+    addToast(`Preços aplicados em ${atualizados} ativo(s) com a data da cota.`, 'success');
   };
 
   const handleImportClick = () => {
@@ -5696,7 +5715,7 @@ export default function BancoDadosFundos() {
                   </td>
                 </tr>
               )}
-              {filteredFundos.map(fundo => (
+              {paginatedFundos.map(fundo => (
                 <tr key={fundo.id} className="border-b border-gray-100 hover:bg-gray-50">
                   <td className="px-3 py-2 text-sm text-gray-800">
                     <div className="font-medium">{fundo.nomeAbreviado || fundo.nomeCompleto}</div>
@@ -5758,11 +5777,30 @@ export default function BancoDadosFundos() {
           </table>
         </div>
 
-        <div className="flex items-center justify-between px-4 py-3 bg-gray-50 border-t border-gray-100 text-xs text-gray-600">
-          <div className="flex items-center gap-4">
+        <div className="flex items-center justify-between gap-4 flex-wrap px-4 py-3 bg-gray-50 border-t border-gray-100 text-xs text-gray-600">
+          <div className="flex items-center gap-4 flex-wrap">
             <span>Total: <strong>{totalFundos}</strong> fundo(s)</span>
             <span>Ativos: <strong>{ativosCount}</strong></span>
             <span>Inativos: <strong>{inativosCount}</strong></span>
+            {totalPages > 1 && (
+              <div className="flex items-center gap-2 pl-4 border-l border-gray-200">
+                <span className="font-medium">Página {currentPage} de {totalPages}</span>
+                <button
+                  onClick={() => setCurrentPage(p => Math.max(p - 1, 1))}
+                  disabled={currentPage === 1}
+                  className="px-2.5 py-1 border border-gray-300 rounded bg-white text-gray-700 hover:bg-gray-100 disabled:opacity-40 disabled:pointer-events-none transition-colors"
+                >
+                  Anterior
+                </button>
+                <button
+                  onClick={() => setCurrentPage(p => Math.min(p + 1, totalPages))}
+                  disabled={currentPage === totalPages}
+                  className="px-2.5 py-1 border border-gray-300 rounded bg-white text-gray-700 hover:bg-gray-100 disabled:opacity-40 disabled:pointer-events-none transition-colors"
+                >
+                  Próxima
+                </button>
+              </div>
+            )}
           </div>
           <div>
             Última atualização de cotas: {lastUpdate || '—'}
@@ -5948,7 +5986,7 @@ export default function BancoDadosFundos() {
 ===== END FILE: src/components/BancoDadosFundos.tsx =====
 
 ===== BEGIN FILE: src/components/BancoDadosRendaFixa.tsx =====
-import { useMemo, useRef, useState, type ChangeEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
 import { Search, Plus, Calculator, Edit2, Trash2, Save, AlertTriangle, Info, Check, Upload, Download } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { useStore } from '../store/useStore';
@@ -6199,6 +6237,7 @@ export default function BancoDadosRendaFixa() {
       .filter(r => {
         const bySearch = !term
           || r.codigo.toLowerCase().includes(term)
+          || (r.codigoCompleto?.toLowerCase() ?? '').includes(term) // <--- Adicionado busca pelo Código Completo
           || r.emissor.toLowerCase().includes(term)
           || CLASSE_LABEL[r.classe as RfClasse]?.toLowerCase().includes(term);
         const byClasse = classeFilter === 'all' || r.classe === classeFilter;
@@ -6207,6 +6246,22 @@ export default function BancoDadosRendaFixa() {
       })
       .sort((a, b) => a.codigo.localeCompare(b.codigo));
   }, [store.rendasFixasReferencia, search, classeFilter, indexFilter]);
+
+  // --- LÓGICA DE PAGINAÇÃO ---
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 100; // Exibe 100 itens por página
+
+  // Se o usuário pesquisar ou filtrar, volta para a página 1
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [search, classeFilter, indexFilter]);
+
+  const totalPages = Math.ceil(rows.length / itemsPerPage);
+  const paginatedRows = useMemo(() => {
+    const start = (currentPage - 1) * itemsPerPage;
+    return rows.slice(start, start + itemsPerPage);
+  }, [rows, currentPage]);
+  // ---------------------------
 
   const openAdd = () => {
     setEditingId(null);
@@ -6695,7 +6750,7 @@ export default function BancoDadosRendaFixa() {
                   <td colSpan={8} className="px-3 py-8 text-center text-sm text-gray-400">Nenhum titulo de renda fixa cadastrado.</td>
                 </tr>
               )}
-              {rows.map(row => {
+              {paginatedRows.map(row => {
                 const tone = getVencimentoTone(row.vencimento);
                 return (
                   <tr key={row.id} className="border-b border-gray-100 hover:bg-gray-50">
@@ -6739,8 +6794,29 @@ export default function BancoDadosRendaFixa() {
           </table>
         </div>
 
-        <div className="px-4 py-3 bg-gray-50 border-t border-gray-100 text-xs text-gray-600">
-          Total: {total} titulos | CDB: {cdbCount} | CRI: {criCount} | CRA: {craCount} | Debenture: {debCount} | COE: {coeCount}
+        <div className="px-4 py-3 bg-gray-50 border-t border-gray-100 flex items-center justify-between gap-4 flex-wrap text-xs text-gray-600">
+          <div>
+            Total: {total} titulos | CDB: {cdbCount} | CRI: {criCount} | CRA: {craCount} | Debenture: {debCount} | COE: {coeCount}
+          </div>
+          {totalPages > 1 && (
+            <div className="flex items-center gap-2">
+              <span className="font-medium">Página {currentPage} de {totalPages}</span>
+              <button
+                onClick={() => setCurrentPage(p => Math.max(p - 1, 1))}
+                disabled={currentPage === 1}
+                className="px-2.5 py-1 border border-gray-300 rounded bg-white text-gray-700 hover:bg-gray-100 disabled:opacity-40 disabled:pointer-events-none transition-colors"
+              >
+                Anterior
+              </button>
+              <button
+                onClick={() => setCurrentPage(p => Math.min(p + 1, totalPages))}
+                disabled={currentPage === totalPages}
+                className="px-2.5 py-1 border border-gray-300 rounded bg-white text-gray-700 hover:bg-gray-100 disabled:opacity-40 disabled:pointer-events-none transition-colors"
+              >
+                Próxima
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
@@ -7322,6 +7398,34 @@ export default function DatabaseDashboard() {
     [store.rvPrices]
   );
 
+  // --- LÓGICA DE PAGINAÇÃO DAS TABELAS GLOBAIS ---
+  const [cdiPage, setCdiPage] = useState(1);
+  const [holidayPage, setHolidayPage] = useState(1);
+  const [rvPage, setRvPage] = useState(1);
+  const itemsPerPageGlobal = 100; // 100 itens por página em cada tabela
+
+  // Paginação CDI
+  const cdiTotalPages = Math.ceil(cdiRows.length / itemsPerPageGlobal);
+  const paginatedCdiRows = useMemo(() => {
+    const start = (cdiPage - 1) * itemsPerPageGlobal;
+    return cdiRows.slice(start, start + itemsPerPageGlobal);
+  }, [cdiRows, cdiPage]);
+
+  // Paginação Feriados
+  const holidayTotalPages = Math.ceil(holidayRows.length / itemsPerPageGlobal);
+  const paginatedHolidayRows = useMemo(() => {
+    const start = (holidayPage - 1) * itemsPerPageGlobal;
+    return holidayRows.slice(start, start + itemsPerPageGlobal);
+  }, [holidayRows, holidayPage]);
+
+  // Paginação RV
+  const rvTotalPages = Math.ceil(rvRows.length / itemsPerPageGlobal);
+  const paginatedRvRows = useMemo(() => {
+    const start = (rvPage - 1) * itemsPerPageGlobal;
+    return rvRows.slice(start, start + itemsPerPageGlobal);
+  }, [rvRows, rvPage]);
+  // -----------------------------------------------
+
   const replaceCdiRows = (rows: Array<{ data: string; taxaDiaria: number; taxaDecimal: number }>) => {
     const dedup = new Map<string, { data: string; taxaDiaria: number; taxaDecimal: number }>();
     for (const row of rows) {
@@ -7821,7 +7925,7 @@ export default function DatabaseDashboard() {
                       <td colSpan={5} className="px-3 py-8 text-center text-sm text-gray-400">Nenhum registro CDI cadastrado.</td>
                     </tr>
                   )}
-                  {cdiRows.map(row => {
+                  {paginatedCdiRows.map(row => {
                     const editing = editingDate === row.data;
                     return (
                       <tr key={row.data} className="border-b border-gray-100 hover:bg-gray-50">
@@ -7860,6 +7964,15 @@ export default function DatabaseDashboard() {
                 </tbody>
               </table>
             </div>
+            {cdiTotalPages > 1 && (
+              <div className="px-4 py-3 bg-gray-50 border-t border-gray-100 flex items-center justify-between text-xs text-gray-600">
+                <span>Mostrando página <strong>{cdiPage}</strong> de <strong>{cdiTotalPages}</strong> ({cdiRows.length} taxas no total)</span>
+                <div className="flex items-center gap-2">
+                  <button onClick={() => setCdiPage(p => Math.max(p - 1, 1))} disabled={cdiPage === 1} className="px-2.5 py-1 border border-gray-300 rounded bg-white text-gray-700 hover:bg-gray-100 disabled:opacity-40 disabled:pointer-events-none transition-colors">Anterior</button>
+                  <button onClick={() => setCdiPage(p => Math.min(p + 1, cdiTotalPages))} disabled={cdiPage === cdiTotalPages} className="px-2.5 py-1 border border-gray-300 rounded bg-white text-gray-700 hover:bg-gray-100 disabled:opacity-40 disabled:pointer-events-none transition-colors">Próxima</button>
+                </div>
+              </div>
+            )}
           </div>
         </>
       )}
@@ -7954,7 +8067,7 @@ export default function DatabaseDashboard() {
                       <td colSpan={4} className="px-3 py-8 text-center text-sm text-gray-400">Nenhum feriado ANBIMA importado.</td>
                     </tr>
                   )}
-                  {holidayRows.map(row => {
+                  {paginatedHolidayRows.map(row => {
                     const editing = editingHolidayId === row.id;
                     return (
                       <tr key={row.id} className="border-b border-gray-100 hover:bg-gray-50">
@@ -7986,6 +8099,15 @@ export default function DatabaseDashboard() {
                 </tbody>
               </table>
             </div>
+            {holidayTotalPages > 1 && (
+              <div className="px-4 py-3 bg-gray-50 border-t border-gray-100 flex items-center justify-between text-xs text-gray-600">
+                <span>Mostrando página <strong>{holidayPage}</strong> de <strong>{holidayTotalPages}</strong> ({holidayRows.length} feriados no total)</span>
+                <div className="flex items-center gap-2">
+                  <button onClick={() => setHolidayPage(p => Math.max(p - 1, 1))} disabled={holidayPage === 1} className="px-2.5 py-1 border border-gray-300 rounded bg-white text-gray-700 hover:bg-gray-100 disabled:opacity-40 disabled:pointer-events-none transition-colors">Anterior</button>
+                  <button onClick={() => setHolidayPage(p => Math.min(p + 1, holidayTotalPages))} disabled={holidayPage === holidayTotalPages} className="px-2.5 py-1 border border-gray-300 rounded bg-white text-gray-700 hover:bg-gray-100 disabled:opacity-40 disabled:pointer-events-none transition-colors">Próxima</button>
+                </div>
+              </div>
+            )}
           </div>
         </>
       )}
@@ -8069,7 +8191,7 @@ export default function DatabaseDashboard() {
                       <td colSpan={5} className="px-3 py-8 text-center text-sm text-gray-400">Nenhum preco de renda variavel cadastrado.</td>
                     </tr>
                   )}
-                  {rvRows.map(row => {
+                  {paginatedRvRows.map(row => {
                     const editing = editingRvId === row.id;
                     return (
                       <tr key={row.id} className="border-b border-gray-100 hover:bg-gray-50">
@@ -8112,6 +8234,15 @@ export default function DatabaseDashboard() {
                 </tbody>
               </table>
           </div>
+          {rvTotalPages > 1 && (
+            <div className="px-4 py-3 bg-gray-50 border-t border-gray-100 flex items-center justify-between text-xs text-gray-600">
+              <span>Mostrando página <strong>{rvPage}</strong> de <strong>{rvTotalPages}</strong> ({rvRows.length} ativos no total)</span>
+              <div className="flex items-center gap-2">
+                <button onClick={() => setRvPage(p => Math.max(p - 1, 1))} disabled={rvPage === 1} className="px-2.5 py-1 border border-gray-300 rounded bg-white text-gray-700 hover:bg-gray-100 disabled:opacity-40 disabled:pointer-events-none transition-colors">Anterior</button>
+                <button onClick={() => setRvPage(p => Math.min(p + 1, rvTotalPages))} disabled={rvPage === rvTotalPages} className="px-2.5 py-1 border border-gray-300 rounded bg-white text-gray-700 hover:bg-gray-100 disabled:opacity-40 disabled:pointer-events-none transition-colors">Próxima</button>
+              </div>
+            </div>
+          )}
         </div>
         </>
       )}
@@ -8376,6 +8507,24 @@ function ResultCell({ value, money = true }: { value: number; money?: boolean })
   return <span className={color}>{money ? formatCurrency(value) : value.toFixed(2)}</span>;
 }
 
+function CdiRelativeCell({ value, isTotal = false }: { value?: number; isTotal?: boolean }) {
+  // 1. Se for inválido ou menor/igual a 0: retorna traço "--"
+  if (value === undefined || !Number.isFinite(value) || value <= 0) {
+    return <td className={`px-2 py-2 text-xs text-right ${isTotal ? 'text-white' : 'text-gray-400'}`}>--</td>;
+  }
+
+  // 2. Se for maior que 0 e menor que 50% (0.50): pinta de vermelho
+  if (value > 0 && value < 0.50) {
+    return <td className="px-2 py-2 text-xs text-right text-red-600 font-medium">{formatPctDecimal(value)}</td>;
+  }
+  // 3. Se for maior ou igual a 50% e menor que 98% (0.98): pinta de laranja (#F79646)
+  if (value >= 0.50 && value < 0.98) {
+    return <td className="px-2 py-2 text-xs text-right font-medium" style={{ color: '#F79646' }}>{formatPctDecimal(value)}</td>;
+  }
+  // 4. Se for entre maior que 98% do CDI: cor verde
+  return <td className={`px-2 py-2 text-xs text-right font-medium ${isTotal ? 'text-emerald-400' : 'text-emerald-700'}`}>{formatPctDecimal(value)}</td>;
+}
+
 export default function PerformanceDashboard() {
   const store = useStore();
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -8442,7 +8591,7 @@ export default function PerformanceDashboard() {
         <td className={td}><ResultCell value={row.totalReturn} /></td>
         <td className={td}>{formatPctDecimal(row.annualIrr)}</td>
         <td className={td}>{formatPctDecimal(row.cdiAnnual)}</td>
-        <td className={`${td} ${row.cdiRelative !== undefined && row.cdiRelative < 1 ? 'text-red-600' : 'text-emerald-700'}`}>{formatPctDecimal(row.cdiRelative)}</td>
+        <CdiRelativeCell value={row.cdiRelative} />
       </tr>,
       ...(isOpen ? children.flatMap(child => renderRow(child, level + 1)) : []),
     ];
@@ -10703,32 +10852,7 @@ function normalize(value: string): string {
     .replace(/\s+/g, ' ')
     .trim();
 }
-/**
- * Extrai o primeiro numero de um texto livre, sem tentar interpretar a
- * frase inteira. Usada para a Taxa Contratada de Renda Fixa, que no
- * extrato BTG vem misturada com texto (ex: "15,00% a.a.", "IPCA + 8,25%",
- * "102% do CDI") — texto esse que continua sendo usado, sem alteracao,
- * para compor o Nome do ativo (ver montagem de "name" nesta funcao).
- *
- * Diferente de parseBrNumber (que tenta interpretar o texto inteiro como
- * um valor monetario), esta funcao so pega o primeiro trecho numerico
- * que encontrar e ignora todo o resto — robusta a qualquer sufixo/prefixo
- * de texto que o extrato venha a usar.
- */
-function parseFirstNumberFromText(value: unknown): number | undefined {
-  const text = String(value ?? '').trim();
-  if (!text) return undefined;
-  const match = text.match(/-?\d+(?:[.,]\d+)?/);
-  if (match) {
-    const num = Number(match[0].replace(',', '.'));
-    if (Number.isFinite(num)) return num;
-  }
-  // Texto sem nenhum numero (ex: "CDI" puro, sem "100% CDI") significa
-  // 100% do indexador citado — comum no BTG para titulos pos-fixados
-  // simples (ex: CDB-CDB226B523E indexado a "CDI", sem spread).
-  if (/\b(cdi|selic|ipca|igp-?m|pre)\b/i.test(text)) return 100;
-  return undefined;
-}
+
 /**
  * Extrai o primeiro numero de um texto livre, sem tentar interpretar a
  * frase inteira. Usada para a Taxa Contratada de Renda Fixa, que no
@@ -10749,8 +10873,6 @@ function parseFirstNumberFromText(value: unknown): number | undefined {
   const num = Number(match[0].replace(',', '.'));
   return Number.isFinite(num) ? num : undefined;
 }
-
-function parseBrNumber(value: unknown): number {
 
 function parseBrNumber(value: unknown): number {
   if (typeof value === 'number') return value;
@@ -11662,24 +11784,51 @@ function movementToSignedAppliedValue(movement: AssetMovement): number {
   }
 }
 
+/**
+ * Busca binária para encontrar o índice acumulado do CDI na data exata ou anterior mais próxima.
+ * Reduz a complexidade de O(N log N) para O(log N).
+ */
 function getCdiIndexOnOrBefore(cdiRates: CdiRate[], date: string): number | undefined {
-  const sorted = [...cdiRates].sort((a, b) => a.data.localeCompare(b.data));
-  let index: number | undefined;
-  for (const row of sorted) {
-    if (row.data <= date) index = row.indiceAcumulado;
-    else break;
+  if (cdiRates.length === 0) return undefined;
+  
+  let low = 0;
+  let high = cdiRates.length - 1;
+  let resultIndex = -1;
+
+  while (low <= high) {
+    const mid = (low + high) >>> 1;
+    if (cdiRates[mid].data <= date) {
+      resultIndex = mid;
+      low = mid + 1; // Tenta encontrar uma data mais próxima ainda
+    } else {
+      high = mid - 1;
+    }
   }
-  return index;
+
+  return resultIndex >= 0 ? cdiRates[resultIndex].indiceAcumulado : undefined;
 }
 
+/**
+ * Busca binária para encontrar o índice acumulado do CDI estritamente anterior à data.
+ */
 function getCdiIndexBefore(cdiRates: CdiRate[], date: string): number | undefined {
-  const sorted = [...cdiRates].sort((a, b) => a.data.localeCompare(b.data));
-  let index: number | undefined;
-  for (const row of sorted) {
-    if (row.data < date) index = row.indiceAcumulado;
-    else break;
+  if (cdiRates.length === 0) return undefined;
+  
+  let low = 0;
+  let high = cdiRates.length - 1;
+  let resultIndex = -1;
+
+  while (low <= high) {
+    const mid = (low + high) >>> 1;
+    if (cdiRates[mid].data < date) {
+      resultIndex = mid;
+      low = mid + 1;
+    } else {
+      high = mid - 1;
+    }
   }
-  return index;
+
+  return resultIndex >= 0 ? cdiRates[resultIndex].indiceAcumulado : undefined;
 }
 
 function groupFlowsByDate(rows: Array<{ date: string; amount: number }>): CashFlow[] {
@@ -11723,6 +11872,10 @@ function getIrRate(days: number, brackets: IrBracket[]): number {
   const bracket = brackets.find(b => days >= b.diasDe && (b.diasAte === undefined || days <= b.diasAte));
   return (bracket?.aliquota ?? 0) / 100;
 }
+
+// ============================================================================
+// SUBSTITUA A FUNÇÃO buildSyntheticRows POR ESTA (COM CACHE DE BUSCAS):
+// ============================================================================
 
 function buildSyntheticRows(
   assets: Asset[],
@@ -11933,8 +12086,14 @@ import type {
   RendaFixaReferencia,
 } from '../types';
 
-// Chave usada para persistência no localStorage
-const STORAGE_KEY = 'investment_portfolio_v1';
+// Chaves desmembradas para persistência de alta performance
+const STORAGE_KEY_MAIN     = 'portfolio_main_v2';
+const STORAGE_KEY_CDI      = 'portfolio_cdi_v2';
+const STORAGE_KEY_HOLIDAYS = 'portfolio_holidays_v2';
+const STORAGE_KEY_RV       = 'portfolio_rv_v2';
+const STORAGE_KEY_FUNDOS   = 'portfolio_fundos_v2';
+const STORAGE_KEY_RF       = 'portfolio_rf_v2';
+const LEGACY_STORAGE_KEY   = 'investment_portfolio_v1';
 
 /** Formato completo dos dados armazenados */
 interface StoreData {
@@ -11980,18 +12139,82 @@ const defaultData: StoreData = {
 };
 
 /**
- * Carrega os dados do localStorage e aplica migrações necessárias
- * para garantir compatibilidade com versões anteriores do schema.
+ * Carrega os dados do localStorage e aplica migrações necessárias.
+ * Suporta migração automática e transparente do modelo antigo (v1) para o novo (v2).
  */
 function loadData(): StoreData {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return defaultData;
+    let mainData: Partial<StoreData> = {};
+    let cdiRates: CdiRate[] = [];
+    let anbimaHolidays: AnbimaHoliday[] = [];
+    let rvPrices: RendaVariavelPrice[] = [];
+    let fundosReferencia: FundoReferencia[] = [];
+    let rendasFixasReferencia: RendaFixaReferencia[] = [];
 
-    const parsed = { ...defaultData, ...JSON.parse(raw) } as StoreData;
+    // 1. Verifica se já existe a estrutura v2 separada
+    const rawMain = localStorage.getItem(STORAGE_KEY_MAIN);
+    if (rawMain) {
+      mainData = JSON.parse(rawMain);
+      
+      const rawCdi = localStorage.getItem(STORAGE_KEY_CDI);
+      if (rawCdi) cdiRates = JSON.parse(rawCdi);
+
+      const rawHolidays = localStorage.getItem(STORAGE_KEY_HOLIDAYS);
+      if (rawHolidays) anbimaHolidays = JSON.parse(rawHolidays);
+
+      const rawRv = localStorage.getItem(STORAGE_KEY_RV);
+      if (rawRv) rvPrices = JSON.parse(rawRv);
+
+      const rawFundos = localStorage.getItem(STORAGE_KEY_FUNDOS);
+      if (rawFundos) fundosReferencia = JSON.parse(rawFundos);
+
+      const rawRf = localStorage.getItem(STORAGE_KEY_RF);
+      if (rawRf) rendasFixasReferencia = JSON.parse(rawRf);
+    } else {
+      // 2. MIGRAÇÃO TRANSPARENTE DA V1 PARA V2 (evita perda de dados do usuário)
+      const rawLegacy = localStorage.getItem(LEGACY_STORAGE_KEY);
+      if (rawLegacy) {
+        const legacyParsed = JSON.parse(rawLegacy) as StoreData;
+        mainData = {
+          clients: legacyParsed.clients,
+          strategies: legacyParsed.strategies,
+          subStrategies: legacyParsed.subStrategies,
+          assets: legacyParsed.assets,
+          assetMovements: legacyParsed.assetMovements,
+          irBrackets: legacyParsed.irBrackets,
+          draftNotes: legacyParsed.draftNotes,
+          selectedClientId: legacyParsed.selectedClientId,
+        };
+        cdiRates = legacyParsed.cdiRates ?? [];
+        anbimaHolidays = legacyParsed.anbimaHolidays ?? [];
+        rvPrices = legacyParsed.rvPrices ?? [];
+        fundosReferencia = legacyParsed.fundosReferencia ?? [];
+        rendasFixasReferencia = legacyParsed.rendasFixasReferencia ?? [];
+
+        // Salva na nova estrutura v2 imediatamente
+        try {
+          localStorage.setItem(STORAGE_KEY_MAIN, JSON.stringify(mainData));
+          localStorage.setItem(STORAGE_KEY_CDI, JSON.stringify(cdiRates));
+          localStorage.setItem(STORAGE_KEY_HOLIDAYS, JSON.stringify(anbimaHolidays));
+          localStorage.setItem(STORAGE_KEY_RV, JSON.stringify(rvPrices));
+          localStorage.setItem(STORAGE_KEY_FUNDOS, JSON.stringify(fundosReferencia));
+          localStorage.setItem(STORAGE_KEY_RF, JSON.stringify(rendasFixasReferencia));
+        } catch {}
+      }
+    }
+
+    const merged: StoreData = {
+      ...defaultData,
+      ...mainData,
+      cdiRates,
+      anbimaHolidays,
+      rvPrices,
+      fundosReferencia,
+      rendasFixasReferencia,
+    };
 
     // Migração de assets: garante que campos novos existam em registros antigos
-    const migratedAssets = parsed.assets.map((asset): Asset => {
+    const migratedAssets = merged.assets.map((asset): Asset => {
       const currentValue = asset.valorPosicao ?? asset.currentValue ?? 0;
       return {
         ...asset,
@@ -12009,27 +12232,75 @@ function loadData(): StoreData {
     });
 
     return {
-      ...parsed,
+      ...merged,
       assets:                  migratedAssets,
-      assetMovements:          parsed.assetMovements          ?? [],
-      cdiRates:                parsed.cdiRates                ?? [],
-      irBrackets:              parsed.irBrackets?.length ? parsed.irBrackets : defaultData.irBrackets,
-      anbimaHolidays:          parsed.anbimaHolidays          ?? [],
-      rvPrices:                parsed.rvPrices                ?? [],
-      fundosReferencia:        parsed.fundosReferencia        ?? [],
-      rendasFixasReferencia:   parsed.rendasFixasReferencia   ?? [],
+      assetMovements:          merged.assetMovements          ?? [],
+      cdiRates:                merged.cdiRates                ?? [],
+      irBrackets:              merged.irBrackets?.length ? merged.irBrackets : defaultData.irBrackets,
+      anbimaHolidays:          merged.anbimaHolidays          ?? [],
+      rvPrices:                merged.rvPrices                ?? [],
+      fundosReferencia:        merged.fundosReferencia        ?? [],
+      rendasFixasReferencia:   merged.rendasFixasReferencia   ?? [],
     };
   } catch {
     return defaultData;
   }
 }
 
-/** Persiste os dados no localStorage (erros silenciosos para não travar a UI) */
-function saveData(data: StoreData): void {
+/** 
+ * Persiste os dados de forma inteligente (Smart Persistence):
+ * Compara as referências em memória e salva APENAS os pedaços que mudaram.
+ * Elimina o travamento ao digitar ou alterar posições.
+ */
+function saveData(next: StoreData, prev?: StoreData): void {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+    // 1. Verifica se algo do Main (clientes, estratégias, carteiras, notas) mudou
+    const mainChanged = !prev ||
+      next.clients !== prev.clients ||
+      next.strategies !== prev.strategies ||
+      next.subStrategies !== prev.subStrategies ||
+      next.assets !== prev.assets ||
+      next.assetMovements !== prev.assetMovements ||
+      next.irBrackets !== prev.irBrackets ||
+      next.draftNotes !== prev.draftNotes ||
+      next.selectedClientId !== prev.selectedClientId;
+
+    if (mainChanged) {
+      const mainData = {
+        clients: next.clients,
+        strategies: next.strategies,
+        subStrategies: next.subStrategies,
+        assets: next.assets,
+        assetMovements: next.assetMovements,
+        irBrackets: next.irBrackets,
+        draftNotes: next.draftNotes,
+        selectedClientId: next.selectedClientId,
+      };
+      localStorage.setItem(STORAGE_KEY_MAIN, JSON.stringify(mainData));
+    }
+
+    // 2. Bancos de Dados Globais (salva apenas se o respectivo catálogo mudou)
+    if (!prev || next.cdiRates !== prev.cdiRates) {
+      localStorage.setItem(STORAGE_KEY_CDI, JSON.stringify(next.cdiRates));
+    }
+
+    if (!prev || next.anbimaHolidays !== prev.anbimaHolidays) {
+      localStorage.setItem(STORAGE_KEY_HOLIDAYS, JSON.stringify(next.anbimaHolidays));
+    }
+
+    if (!prev || next.rvPrices !== prev.rvPrices) {
+      localStorage.setItem(STORAGE_KEY_RV, JSON.stringify(next.rvPrices));
+    }
+
+    if (!prev || next.fundosReferencia !== prev.fundosReferencia) {
+      localStorage.setItem(STORAGE_KEY_FUNDOS, JSON.stringify(next.fundosReferencia));
+    }
+
+    if (!prev || next.rendasFixasReferencia !== prev.rendasFixasReferencia) {
+      localStorage.setItem(STORAGE_KEY_RF, JSON.stringify(next.rendasFixasReferencia));
+    }
   } catch {
-    // Sem ação — pode ocorrer em modo privado com storage cheio
+    // Erro silencioso (ex: modo privado com storage cheio)
   }
 }
 
@@ -12070,12 +12341,13 @@ function notify(): void {
 }
 
 /**
- * Atualiza o estado global, persiste no localStorage e notifica os listeners.
+ * Atualiza o estado global, persiste de forma seletiva no localStorage e notifica os listeners.
  * @param updater Função pura que recebe o estado atual e retorna o novo estado
  */
 function updateStore(updater: (prev: StoreData) => StoreData): void {
+  const prevData = storeData;
   storeData = updater(storeData);
-  saveData(storeData);
+  saveData(storeData, prevData);
   notify();
 }
 
@@ -13655,8 +13927,10 @@ function toISODate(date: Date): string {
  * Converte data do BCB ('dd/MM/yyyy') para 'YYYY-MM-DD'.
  */
 function bcbDateToISO(date: string): string {
-  const [day, month, year] = date.split('/');
-  return `${year}-${month}-${day}`;
+  if (date.includes('-')) return date; // Se já estiver ISO, retorna direto
+  const parts = date.split('/');
+  if (parts.length !== 3) return date;
+  return `${parts[2]}-${parts[1]}-${parts[0]}`;
 }
 
 /**
@@ -13674,25 +13948,29 @@ function shiftYearMonth(year: number, month: number, months: number): { year: nu
 /**
  * Verifica se uma data é dia útil no mercado financeiro brasileiro.
  * @param date Data a verificar.
- * @param holidays Lista de feriados ANBIMA no formato 'YYYY-MM-DD'.
+ * @param holidays Lista ou Set de feriados ANBIMA no formato 'YYYY-MM-DD'.
  * @returns true se for dia útil, false caso contrário.
  */
-export function isWorkingDay(date: Date, holidays: string[]): boolean {
+export function isWorkingDay(date: Date, holidays: string[] | Set<string>): boolean {
   const dayOfWeek = date.getDay();
   if (dayOfWeek === 0 || dayOfWeek === 6) return false;
 
   const isoDate = toISODate(date);
+  if (holidays instanceof Set) {
+    return !holidays.has(isoDate);
+  }
   return !holidays.includes(isoDate);
 }
 
 /**
  * Retorna todos os dias úteis entre duas datas (inclusive).
+ * Utiliza Set para busca O(1) de feriados.
  * @param start Data inicial.
  * @param end Data final.
- * @param holidays Lista de feriados ANBIMA no formato 'YYYY-MM-DD'.
+ * @param holidays Lista ou Set de feriados ANBIMA no formato 'YYYY-MM-DD'.
  * @returns Array de objetos Date representando dias úteis.
  */
-export function getWorkingDaysBetween(start: Date, end: Date, holidays: string[]): Date[] {
+export function getWorkingDaysBetween(start: Date, end: Date, holidays: string[] | Set<string>): Date[] {
   const workingDays: Date[] = [];
   const current = new Date(start);
   const last = new Date(end);
@@ -13701,9 +13979,16 @@ export function getWorkingDaysBetween(start: Date, end: Date, holidays: string[]
   current.setHours(0, 0, 0, 0);
   last.setHours(0, 0, 0, 0);
 
+  // Otimização: garante que holidays seja um Set para lookup instantâneo
+  const holidaySet = holidays instanceof Set ? holidays : new Set(holidays);
+
   while (current <= last) {
-    if (isWorkingDay(current, holidays)) {
-      workingDays.push(new Date(current));
+    const dayOfWeek = current.getDay();
+    if (dayOfWeek !== 0 && dayOfWeek !== 6) {
+      const isoDate = toISODate(current);
+      if (!holidaySet.has(isoDate)) {
+        workingDays.push(new Date(current));
+      }
     }
     current.setDate(current.getDate() + 1);
   }
@@ -13724,19 +14009,13 @@ export function calcularTaxaDiariaAnualizada(taxaAnual: number): number {
 /**
  * Calcula o valor atual de um investimento prefixado.
  * Aplica juros compostos em cada dia útil entre dataInicio e dataFim.
- * @param valorAplicado Valor inicial aplicado.
- * @param taxaAnualPct Taxa prefixada anual em percentual (ex: 14 para 14% a.a.).
- * @param dataInicio Data de início do investimento.
- * @param dataFim Data de cálculo/fim.
- * @param holidays Lista de feriados ANBIMA.
- * @returns Valor atualizado.
  */
 export function calcularPrefixado(
   valorAplicado: number,
   taxaAnualPct: number,
   dataInicio: Date,
   dataFim: Date,
-  holidays: string[]
+  holidays: string[] | Set<string>
 ): number {
   const taxaDiaria = calcularTaxaDiariaAnualizada(taxaAnualPct);
   const workingDays = getWorkingDaysBetween(dataInicio, dataFim, holidays);
@@ -13752,24 +14031,19 @@ export function calcularPrefixado(
 /**
  * Calcula o valor atual de um investimento atrelado a percentual do CDI.
  * Fórmula por dia útil: taxa_dia = taxaCdi.taxaDiaria * (percentualCdi / 100)
- * @param valorAplicado Valor inicial aplicado.
- * @param percentualCdi Percentual do CDI (ex: 120 para 120% do CDI).
-  * @param dataInicio Data de início do investimento.
- * @param dataFim Data de cálculo/fim.
- * @param taxasCdi Array de taxas CDI diárias.
- * @param holidays Lista de feriados ANBIMA.
- * @returns Valor atualizado.
  */
 export function calcularCdiPercentual(
   valorAplicado: number,
   percentualCdi: number,
   dataInicio: Date,
   dataFim: Date,
-  taxasCdi: CdiRate[],
-  holidays: string[]
+  taxasCdi: CdiRate[] | Map<string, number>,
+  holidays: string[] | Set<string>
 ): number {
   const workingDays = getWorkingDaysBetween(dataInicio, dataFim, holidays);
-  const cdiMap = new Map(taxasCdi.map(t => [bcbDateToISO(t.data), t.taxaDiaria]));
+  const cdiMap = taxasCdi instanceof Map 
+    ? taxasCdi 
+    : new Map(taxasCdi.map(t => [bcbDateToISO(t.data), t.taxaDiaria]));
   const multiplicador = percentualCdi / 100;
 
   let valorAtual = valorAplicado;
@@ -13786,25 +14060,20 @@ export function calcularCdiPercentual(
 /**
  * Calcula o valor atual de um investimento CDI + spread anual.
  * Fórmula por dia útil: taxa_dia = (1 + taxaCdi.taxaDiaria) * (1 + spread_diario) - 1
- * @param valorAplicado Valor inicial aplicado.
- * @param spreadAnualPct Spread anual em percentual (ex: 2.0 para CDI + 2% a.a.).
- * @param dataInicio Data de início do investimento.
- * @param dataFim Data de cálculo/fim.
- * @param taxasCdi Array de taxas CDI diárias.
- * @param holidays Lista de feriados ANBIMA.
- * @returns Valor atualizado.
  */
 export function calcularCdiMaisSpread(
   valorAplicado: number,
   spreadAnualPct: number,
   dataInicio: Date,
   dataFim: Date,
-  taxasCdi: CdiRate[],
-  holidays: string[]
+  taxasCdi: CdiRate[] | Map<string, number>,
+  holidays: string[] | Set<string>
 ): number {
   const spreadDiario = calcularTaxaDiariaAnualizada(spreadAnualPct);
   const workingDays = getWorkingDaysBetween(dataInicio, dataFim, holidays);
-  const cdiMap = new Map(taxasCdi.map(t => [bcbDateToISO(t.data), t.taxaDiaria]));
+  const cdiMap = taxasCdi instanceof Map 
+    ? taxasCdi 
+    : new Map(taxasCdi.map(t => [bcbDateToISO(t.data), t.taxaDiaria]));
 
   let valorAtual = valorAplicado;
   for (const day of workingDays) {
@@ -13820,28 +14089,25 @@ export function calcularCdiMaisSpread(
 /**
  * Calcula o valor atual de um investimento IPCA + spread anual.
  * Usa defasagem de 2 meses (M-2) para o IPCA.
- * Fórmula por dia útil: taxa_dia = (1 + ipca_diario) * (1 + spread_diario) - 1
- * @param valorAplicado Valor inicial aplicado.
- * @param spreadAnualPct Spread anual em percentual (ex: 5.0 para IPCA + 5% a.a.).
- * @param dataInicio Data de início do investimento.
- * @param dataFim Data de cálculo/fim.
- * @param ipcaMensal Array de índices IPCA mensais {data: 'MM/YYYY', valor: percentual}.
- * @param holidays Lista de feriados ANBIMA.
- * @returns Valor atualizado.
  */
 export function calcularIpcaMaisSpread(
   valorAplicado: number,
   spreadAnualPct: number,
   dataInicio: Date,
   dataFim: Date,
-  ipcaMensal: Array<{ data: string; valor: number }>,
-  holidays: string[]
+  ipcaMensal: Array<{ data: string; valor: number }> | Map<string, number>,
+  holidays: string[] | Set<string>
 ): number {
   const spreadDiario = calcularTaxaDiariaAnualizada(spreadAnualPct);
-  const ipcaMap = new Map(ipcaMensal.map(item => [item.data, item.valor]));
+  const ipcaMap = ipcaMensal instanceof Map 
+    ? ipcaMensal 
+    : new Map(ipcaMensal.map(item => [item.data, item.valor]));
 
-  // Pré-calcula dias úteis de cada mês para converter IPCA mensal em diário
-  const workingDays = getWorkingDaysBetween(dataInicio, dataFim, holidays);
+  const holidaySet = holidays instanceof Set ? holidays : new Set(holidays);
+  const workingDays = getWorkingDaysBetween(dataInicio, dataFim, holidaySet);
+
+  // Cache para evitar recalcular dias úteis do mês repetidamente
+  const workingDaysInMonthCache = new Map<string, number>();
 
   let valorAtual = valorAplicado;
   for (const day of workingDays) {
@@ -13853,10 +14119,15 @@ export function calcularIpcaMaisSpread(
     const targetKey = `${String(target.month).padStart(2, '0')}/${target.year}`;
     const ipcaMensalValor = ipcaMap.get(targetKey) ?? 0;
 
-    // Conta dias úteis do mês atual para converter IPCA mensal em diário
-    const firstDayOfMonth = new Date(year, month - 1, 1);
-    const lastDayOfMonth = new Date(year, month, 0);
-    const workingDaysInMonth = getWorkingDaysBetween(firstDayOfMonth, lastDayOfMonth, holidays).length;
+    // Utiliza cache para a contagem de dias úteis do mês
+    const monthKey = `${year}-${month}`;
+    let workingDaysInMonth = workingDaysInMonthCache.get(monthKey);
+    if (workingDaysInMonth === undefined) {
+      const firstDayOfMonth = new Date(year, month - 1, 1);
+      const lastDayOfMonth = new Date(year, month, 0);
+      workingDaysInMonth = getWorkingDaysBetween(firstDayOfMonth, lastDayOfMonth, holidaySet).length;
+      workingDaysInMonthCache.set(monthKey, workingDaysInMonth);
+    }
 
     const ipcaDiario = workingDaysInMonth > 0
       ? Math.pow(1 + ipcaMensalValor / 100, 1 / workingDaysInMonth) - 1
@@ -13871,17 +14142,12 @@ export function calcularIpcaMaisSpread(
 
 /**
  * Orquestrador de cálculo de valor atual para ativos de Renda Fixa.
- * @param asset Ativo a ser avaliado.
- * @param taxasCdi Array de taxas CDI diárias.
- * @param ipcaMensal Array de índices IPCA mensais.
- * @param holidays Lista de feriados ANBIMA.
- * @returns Valor atual calculado ou null se não for aplicável.
  */
 export function calcularValorAtualAsset(
   asset: Asset,
-  taxasCdi: CdiRate[],
-  ipcaMensal: Array<{ data: string; valor: number }>,
-  holidays: string[]
+  taxasCdi: CdiRate[] | Map<string, number>,
+  ipcaMensal: Array<{ data: string; valor: number }> | Map<string, number>,
+  holidays: string[] | Set<string>
 ): number | null {
   const tiposRendaFixa: Array<Asset['tipo']> = ['cdb', 'cri', 'cra', 'debenture', 'coe'];
   if (!tiposRendaFixa.includes(asset.tipo)) return null;
@@ -13890,11 +14156,13 @@ export function calcularValorAtualAsset(
   const valorAplicado = asset.valorNominal;
   const dataInicio = new Date(asset.dataEmissao);
   const dataFim = new Date();
+  
+  const holidaySet = holidays instanceof Set ? holidays : new Set(holidays);
 
   switch (asset.tipoIndexador) {
     case 'prefixado':
       if (asset.taxaContratada === undefined) return null;
-      return calcularPrefixado(valorAplicado, asset.taxaContratada, dataInicio, dataFim, holidays);
+      return calcularPrefixado(valorAplicado, asset.taxaContratada, dataInicio, dataFim, holidaySet);
 
     case 'cdi_percentual':
       if (asset.taxaContratada === undefined) return null;
@@ -13904,7 +14172,7 @@ export function calcularValorAtualAsset(
         dataInicio,
         dataFim,
         taxasCdi,
-        holidays
+        holidaySet
       );
 
     case 'cdi_mais_spread':
@@ -13915,7 +14183,7 @@ export function calcularValorAtualAsset(
         dataInicio,
         dataFim,
         taxasCdi,
-        holidays
+        holidaySet
       );
 
     case 'ipca_mais_spread':
@@ -13926,7 +14194,7 @@ export function calcularValorAtualAsset(
         dataInicio,
         dataFim,
         ipcaMensal,
-        holidays
+        holidaySet
       );
 
     case 'selic':
@@ -13938,16 +14206,13 @@ export function calcularValorAtualAsset(
         dataInicio,
         dataFim,
         taxasCdi,
-        holidays
+        holidaySet
       );
 
     case 'igpm_mais_spread':
-      // IGPM seguiria a mesma lógica do IPCA com defasagem M-2.
-      // Como a assinatura atual recebe apenas IPCA, retornamos null.
       return null;
 
     case 'tr':
-      // TR exige série histórica específica, não implementado nesta versão.
       return null;
 
     default:

@@ -68,32 +68,7 @@ function normalize(value: string): string {
     .replace(/\s+/g, ' ')
     .trim();
 }
-/**
- * Extrai o primeiro numero de um texto livre, sem tentar interpretar a
- * frase inteira. Usada para a Taxa Contratada de Renda Fixa, que no
- * extrato BTG vem misturada com texto (ex: "15,00% a.a.", "IPCA + 8,25%",
- * "102% do CDI") — texto esse que continua sendo usado, sem alteracao,
- * para compor o Nome do ativo (ver montagem de "name" nesta funcao).
- *
- * Diferente de parseBrNumber (que tenta interpretar o texto inteiro como
- * um valor monetario), esta funcao so pega o primeiro trecho numerico
- * que encontrar e ignora todo o resto — robusta a qualquer sufixo/prefixo
- * de texto que o extrato venha a usar.
- */
-function parseFirstNumberFromText(value: unknown): number | undefined {
-  const text = String(value ?? '').trim();
-  if (!text) return undefined;
-  const match = text.match(/-?\d+(?:[.,]\d+)?/);
-  if (match) {
-    const num = Number(match[0].replace(',', '.'));
-    if (Number.isFinite(num)) return num;
-  }
-  // Texto sem nenhum numero (ex: "CDI" puro, sem "100% CDI") significa
-  // 100% do indexador citado — comum no BTG para titulos pos-fixados
-  // simples (ex: CDB-CDB226B523E indexado a "CDI", sem spread).
-  if (/\b(cdi|selic|ipca|igp-?m|pre)\b/i.test(text)) return 100;
-  return undefined;
-}
+
 /**
  * Extrai o primeiro numero de um texto livre, sem tentar interpretar a
  * frase inteira. Usada para a Taxa Contratada de Renda Fixa, que no
@@ -114,8 +89,6 @@ function parseFirstNumberFromText(value: unknown): number | undefined {
   const num = Number(match[0].replace(',', '.'));
   return Number.isFinite(num) ? num : undefined;
 }
-
-function parseBrNumber(value: unknown): number {
 
 function parseBrNumber(value: unknown): number {
   if (typeof value === 'number') return value;
