@@ -67,27 +67,29 @@ export default function ClientManager() {
           </div>
           <div>
             <h2 className="font-bold text-gray-800">Clientes</h2>
-            <p className="text-xs text-gray-500">Gerencie os portfólios dos clientes</p>
+                        <p className="text-xs text-gray-500">Gerencie os portfólios dos clientes</p>
           </div>
         </div>
-        <button
-          onClick={handleAdd}
-          className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium"
-        >
-          <Plus size={16} />
-          Novo Cliente
-        </button>
+        {store.currentUser?.role !== 'cliente_final' && (
+          <button
+            onClick={handleAdd}
+            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium"
+          >
+            <Plus size={16} />
+            Novo Cliente
+          </button>
+        )}
       </div>
 
       <div className="divide-y divide-gray-50">
-        {store.clients.length === 0 && (
+        {store.activeClients.length === 0 && (
           <div className="px-6 py-10 text-center text-gray-400">
             <Users size={40} className="mx-auto mb-3 opacity-30" />
-            <p className="text-sm">Nenhum cliente cadastrado</p>
-            <p className="text-xs mt-1">Clique em "Novo Cliente" para começar</p>
+            <p className="text-sm">Nenhum cliente disponível para seu nível de acesso</p>
+            {store.currentUser?.role !== 'cliente_final' && <p className="text-xs mt-1">Clique em "Novo Cliente" para começar</p>}
           </div>
         )}
-        {store.clients.map(client => (
+        {store.activeClients.map(client => (
           <div
             key={client.id}
             className={`flex items-center justify-between px-6 py-4 cursor-pointer hover:bg-gray-50 transition-colors ${store.selectedClientId === client.id ? 'bg-blue-50 border-l-4 border-blue-500' : ''}`}
@@ -98,10 +100,20 @@ export default function ClientManager() {
                 {client.name.charAt(0).toUpperCase()}
               </div>
               <div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                   <span className="font-semibold text-gray-800">{client.name}</span>
                   {store.selectedClientId === client.id && (
                     <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-medium">Ativo</span>
+                  )}
+                  {client.escritorioId && (
+                    <span className="text-[10px] bg-indigo-100 text-indigo-800 px-2 py-0.5 rounded font-bold border border-indigo-200">
+                      🏢 {client.escritorioId.toUpperCase()}
+                    </span>
+                  )}
+                  {client.assessorId && store.currentUser?.role === 'master_geral' && (
+                    <span className="text-[10px] bg-purple-100 text-purple-800 px-2 py-0.5 rounded font-medium">
+                      Assessor: {store.users.find(u => u.id === client.assessorId)?.name || client.assessorId}
+                    </span>
                   )}
                 </div>
                 <div className="text-xs text-gray-500 mt-0.5">
@@ -111,32 +123,34 @@ export default function ClientManager() {
                 </div>
               </div>
             </div>
-            <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
-              <button
-                onClick={() => handleEdit(client)}
-                className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-              >
-                <Edit2 size={15} />
-              </button>
-              {deleteConfirm === client.id ? (
-                <div className="flex items-center gap-1">
-                  <span className="text-xs text-red-600 mr-1">Confirmar?</span>
-                  <button onClick={() => handleDelete(client.id)} className="p-1.5 text-white bg-red-500 rounded hover:bg-red-600 transition-colors">
-                    <Check size={13} />
-                  </button>
-                  <button onClick={() => setDeleteConfirm(null)} className="p-1.5 text-gray-500 bg-gray-100 rounded hover:bg-gray-200 transition-colors">
-                    <X size={13} />
-                  </button>
-                </div>
-              ) : (
+            {store.currentUser?.role !== 'cliente_final' && (
+              <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
                 <button
-                  onClick={() => setDeleteConfirm(client.id)}
-                  className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                  onClick={() => handleEdit(client)}
+                  className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
                 >
-                  <Trash2 size={15} />
+                  <Edit2 size={15} />
                 </button>
-              )}
-            </div>
+                {deleteConfirm === client.id ? (
+                  <div className="flex items-center gap-1">
+                    <span className="text-xs text-red-600 mr-1">Confirmar?</span>
+                    <button onClick={() => handleDelete(client.id)} className="p-1.5 text-white bg-red-500 rounded hover:bg-red-600 transition-colors">
+                      <Check size={13} />
+                    </button>
+                    <button onClick={() => setDeleteConfirm(null)} className="p-1.5 text-gray-500 bg-gray-100 rounded hover:bg-gray-200 transition-colors">
+                      <X size={13} />
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => setDeleteConfirm(client.id)}
+                    className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                  >
+                    <Trash2 size={15} />
+                  </button>
+                )}
+              </div>
+            )}
           </div>
         ))}
       </div>

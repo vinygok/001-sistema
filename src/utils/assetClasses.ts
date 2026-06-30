@@ -93,6 +93,8 @@ export interface CatalogMatch {
   codigoRF?: string;
   vencimentoRF?: string;
   tipoIndexadorRF?: AssetIndexer;
+  taxaContratadaRF?: number;
+  spreadContratadoRF?: number;
 }
 
 
@@ -138,7 +140,7 @@ export function findCatalogMatch(
     return { source: 'fundo', referenciaId: fundo.id, tipo: fundo.classeAnbima ?? '', cnpj: fundo.cnpj };
   }
 
-  const rf = rendasFixasReferencia.find(r => r.codigoCompleto && normalizeClasse(r.codigoCompleto) === nameKey);
+    const rf = rendasFixasReferencia.find(r => r.codigoCompleto && normalizeClasse(r.codigoCompleto) === nameKey);
   if (rf) {
     return {
       source: 'rf',
@@ -147,6 +149,8 @@ export function findCatalogMatch(
       codigoRF: rf.codigo,
       vencimentoRF: rf.vencimento,
       tipoIndexadorRF: rf.tipoIndexador,
+      taxaContratadaRF: rf.taxaContratada,
+      spreadContratadoRF: rf.spreadContratado,
     };
   }
 

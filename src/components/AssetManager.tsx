@@ -2,7 +2,7 @@ import { useRef, useState, useMemo, type ChangeEvent } from 'react';
 import { Briefcase, Plus, Edit2, Trash2, Check, X, Search, Tag, Upload, Download, ChevronDown, ChevronRight, AlertTriangle, ArrowUpDown, Database } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { useStore } from '../store/useStore';
-import type { Asset, AssetMovement, AssetIndexer, AssetTargetMode, AssetUpdateSource, MovementType, RendaVariavelPrice, FundoReferencia, RendaFixaReferencia } from '../types';
+import type { Asset, AssetMovement, AssetIndexer, AssetTargetMode, AssetUpdateSource, MovementType } from '../types';
 import { findCatalogMatch } from '../utils/assetClasses';
 import Modal from './Modal';
 import { formatCurrency } from '../utils/portfolio';
@@ -47,6 +47,9 @@ interface DbSuggestion {
   precoUnitario?: number;
   vencimento?: string;
   tipoIndexador?: AssetIndexer;
+  /** Taxa/spread contratado na emissao do titulo (ver RendaFixaReferencia). */
+  taxaContratada?: number;
+  spreadContratado?: number;
 }
 
 interface MovementForm {
@@ -199,41 +202,11 @@ function parseToIsoDate(value: unknown): string | undefined {
 }
 
 function getSignedMovementQuantity(movement: AssetMovement): number {
-  if (movement.quantidade === undefined) return 0;
+    if (movement.quantidade === undefined) return 0;
   const absQty = Math.abs(movement.quantidade);
   if (movement.tipoMovimentacao === 'compra') return absQty;
   if (movement.tipoMovimentacao === 'venda') return -absQty;
   return 0;
-}
-
-function resolveAssetByPriority(existingAssets: Asset[], candidate: {
-  identificadorExterno?: string;
-  isin?: string;
-  cnpj?: string;
-  tickerCodigo?: string;
-  name?: string;
-}) {
-  if (candidate.identificadorExterno) {
-    const found = existingAssets.find(a => normalizeKey(a.identificadorExterno ?? '') === normalizeKey(candidate.identificadorExterno ?? ''));
-    if (found) return found;
-  }
-  if (candidate.isin) {
-    const found = existingAssets.find(a => normalizeKey(a.isin ?? '') === normalizeKey(candidate.isin ?? ''));
-    if (found) return found;
-  }
-  if (candidate.cnpj) {
-    const found = existingAssets.find(a => normalizeKey(a.cnpj ?? '') === normalizeKey(candidate.cnpj ?? ''));
-    if (found) return found;
-  }
-  if (candidate.tickerCodigo) {
-    const found = existingAssets.find(a => normalizeKey(a.tickerCodigo ?? '') === normalizeKey(candidate.tickerCodigo ?? ''));
-    if (found) return found;
-  }
-  if (candidate.name) {
-    const found = existingAssets.find(a => normalizeKey(a.name) === normalizeKey(candidate.name ?? ''));
-    if (found) return found;
-  }
-return undefined;
 }
 
 export default function AssetManager() {
@@ -351,6 +324,8 @@ export default function AssetManager() {
           codigo: r.codigo,
           vencimento: r.vencimento,
           tipoIndexador: r.tipoIndexador,
+          taxaContratada: r.taxaContratada,
+          spreadContratado: r.spreadContratado,
         });
       });
     
@@ -366,6 +341,17 @@ export default function AssetManager() {
   };
 
 const selectSuggestion = (s: DbSuggestion) => {
+    // Taxa contratada/spread agora e caracteristica do titulo no catalogo
+    // (definida ao cadastrar em Banco de Dados > Renda Fixa), nao mais
+    // uma escolha do usuario ao adquirir na carteira. O campo unico do
+    // formulario (taxaContratada) recebe o que estiver preenchido no
+    // catalogo, seja taxaContratada ou spreadContratado.
+      const taxaDoCatalogo = s.source === 'rf'
+      ? (s.taxaContratada !== undefined
+          ? String(s.taxaContratada).replace('.', ',')
+          : (s.spreadContratado !== undefined ? String(s.spreadContratado).replace('.', ',') : ''))
+      : '';
+
     setForm(prev => ({
       ...prev,
       name: s.name,
@@ -380,7 +366,7 @@ const selectSuggestion = (s: DbSuggestion) => {
       identificadorExterno: s.source === 'rf' ? (s.codigo ?? '') : '',
       vencimentoRF: s.source === 'rf' ? (s.vencimento ?? '') : '',
       tipoIndexadorRF: s.source === 'rf' ? (s.tipoIndexador ?? '') : '',
-      taxaContratada: '',
+      taxaContratada: taxaDoCatalogo,
       quantidade: '',
     }));
     setShowSuggestions(false);
@@ -424,8 +410,8 @@ const openEdit = (asset: Asset) => {
       vencimentoRF: asset.dataVencimento ?? '',
       tipoIndexadorRF: asset.tipoIndexador ?? '',
       taxaContratada: asset.taxaContratada !== undefined
-        ? String(asset.taxaContratada)
-        : (asset.spreadContratado !== undefined ? String(asset.spreadContratado) : ''),
+        ? String(asset.taxaContratada).replace('.', ',')
+        : (asset.spreadContratado !== undefined ? String(asset.spreadContratado).replace('.', ',') : ''),
     });
     setEditId(asset.id);
     setShowModal(true);
@@ -440,7 +426,7 @@ const handleSave = () => {
       : roundMoney(Number.isFinite(valorPosicaoInput) ? valorPosicaoInput : 0);
 
     const isRendaFixa = form.matchedSource === 'rf';
-    const spreadIndexadores: AssetIndexer[] = ['cdi_mais_spread', 'ipca_mais_spread', 'igpm_mais_spread'];
+    const spreadIndexadores: AssetIndexer[] = ['cdi_mais_spread', 'ipca_mais_spread', 'igpm_mais_spread', 'selic_mais_spread'];
     const taxaContratadaNum = parseSheetNumber(form.taxaContratada);
     const usaSpread = isRendaFixa && form.tipoIndexadorRF && spreadIndexadores.includes(form.tipoIndexadorRF as AssetIndexer);
 
@@ -746,11 +732,19 @@ const handleImportFile = async (event: ChangeEvent<HTMLInputElement>) => {
           payload.quantidade = Number.isFinite(qtd) ? qtd : undefined;
           payload.precoUnitario = Number.isFinite(unit) ? unit : undefined;
 
-          // Taxa contratada: unico campo de Renda Fixa que e SEMPRE
-          // escolhido pelo usuario (planilha), nunca vem do catalogo.
+          // Taxa contratada/spread: agora e caracteristica do titulo no
+          // catalogo (Banco de Dados > Renda Fixa) — prioridade maxima.
+          // So cai para o valor digitado na planilha se o catalogo nao
+          // tiver essa informacao preenchida (ex: titulo cadastrado antes
+          // dessa mudanca, sem taxa salva ainda).
           if (catalogMatch.source === 'rf') {
-            const taxaContratadaNum = parseSheetNumber(normalized.taxacontratada);
-            payload.taxaContratada = Number.isFinite(taxaContratadaNum) ? taxaContratadaNum : undefined;
+            if (catalogMatch.taxaContratadaRF !== undefined || catalogMatch.spreadContratadoRF !== undefined) {
+              payload.taxaContratada = catalogMatch.taxaContratadaRF;
+              payload.spreadContratado = catalogMatch.spreadContratadoRF;
+            } else {
+              const taxaContratadaNum = parseSheetNumber(normalized.taxacontratada);
+              payload.taxaContratada = Number.isFinite(taxaContratadaNum) ? taxaContratadaNum : undefined;
+            }
           }
         } else {
           // ── 5b. Ativo LIVRE (sem match no catalogo): so os campos base
@@ -1436,7 +1430,7 @@ const handleImportFile = async (event: ChangeEvent<HTMLInputElement>) => {
 
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Taxa contratada</label>
-                  <input type="number" step="0.01" value={form.taxaContratada} onChange={e => setForm(prev => ({ ...prev, taxaContratada: e.target.value }))} placeholder="Ex: 2 ou 0,3" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" />
+                  <input value={form.taxaContratada} disabled className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-gray-50 text-gray-500" />
                 </div>
               </>
             )}

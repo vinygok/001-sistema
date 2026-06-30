@@ -25,16 +25,16 @@ type RfClasse =
   | 'lig'
   | 'ltf'
   | 'ltn'
-  | 'ntn-b'
-  | 'ntn-b-p'
-  | 'ntn-b1'
-  | 'ntn-f'
+  | 'ntnb'
+  | 'ntnbp'
+  | 'ntnb1'
+  | 'ntnf'
   | 'tesouro direto - lft'
   | 'tesouro direto - ltn'
-  | 'tesouro direto - ntn-b'
-  | 'tesouro direto - ntn-b1'
-  | 'tesouro direto - ntn-b-p'
-  | 'tesouro direto - ntn-f';
+  | 'tesouro direto - ntnb'
+  | 'tesouro direto - ntnb1'
+  | 'tesouro direto - ntnbp'
+  | 'tesouro direto - ntnf';
 
 interface Toast {
   id: string;
@@ -45,11 +45,24 @@ interface Toast {
 interface RfForm {
   classe: RfClasse;
   codigo: string;
+  /**
+   * Codigo Completo NAO e mais digitado pelo usuario — e calculado
+   * automaticamente (ver buildCodigoCompleto) a partir de Classe,
+   * Emissor, Codigo, Indexador, Taxa e Vencimento. Mantido no form
+   * apenas como cache do valor exibido/salvo, nunca editado via input.
+   */
   codigoCompleto: string;
   isin: string;
   emissor: string;
   cnpjEmissor: string;
   tipoIndexador: AssetIndexer;
+  /**
+   * Taxa ou spread contratado na emissao do titulo, conforme o indexador
+   * (ver formatTaxaTexto para a semantica de cada caso). Digitado como
+   * texto para permitir campo vazio durante a digitacao; convertido para
+   * numero em handleSave.
+   */
+  taxa: string;
   vencimento: string;
   dataEmissao: string;
   pagaCupom: boolean;
@@ -79,16 +92,16 @@ const CLASSE_LABEL: Record<RfClasse, string> = {
   lig: 'LIG',
   ltf: 'LTF',
   ltn: 'LTN',
-  'ntn-b': 'NTN-B',
-  'ntn-b-p': 'NTN-B-P',
-  'ntn-b1': 'NTN-B1',
-  'ntn-f': 'NTN-F',
+  ntnb: 'NTN-B',
+  ntnbp: 'NTN-B-P',
+  ntnb1: 'NTN-B1',
+  ntnf: 'NTN-F',
   'tesouro direto - lft': 'Tesouro Direto - LFT',
   'tesouro direto - ltn': 'Tesouro Direto - LTN',
-  'tesouro direto - ntn-b': 'Tesouro Direto - NTN-B',
-  'tesouro direto - ntn-b1': 'Tesouro Direto - NTN-B1',
-  'tesouro direto - ntn-b-p': 'Tesouro Direto - NTN-B-P',
-  'tesouro direto - ntn-f': 'Tesouro Direto - NTN-F',
+  'tesouro direto - ntnb': 'Tesouro Direto - NTN-B',
+  'tesouro direto - ntnb1': 'Tesouro Direto - NTN-B1',
+  'tesouro direto - ntnbp': 'Tesouro Direto - NTN-B-P',
+  'tesouro direto - ntnf': 'Tesouro Direto - NTN-F',
 };
 
 const CLASSE_PREFIX: Record<RfClasse, string> = {
@@ -110,37 +123,104 @@ const CLASSE_PREFIX: Record<RfClasse, string> = {
   lig: 'LIG-',
   ltf: 'LTF-',
   ltn: 'LTN-',
-  'ntn-b': 'NTN-B-',
-  'ntn-b-p': 'NTN-B-P-',
-  'ntn-b1': 'NTN-B1-',
-  'ntn-f': 'NTN-F-',
+  ntnb: 'NTN-B-',
+  ntnbp: 'NTN-B-P-',
+  ntnb1: 'NTN-B1-',
+  ntnf: 'NTN-F-',
   'tesouro direto - lft': 'TES-LFT-',
   'tesouro direto - ltn': 'TES-LTN-',
-  'tesouro direto - ntn-b': 'TES-NTN-B-',
-  'tesouro direto - ntn-b1': 'TES-NTN-B1-',
-  'tesouro direto - ntn-b-p': 'TES-NTN-B-P-',
-  'tesouro direto - ntn-f': 'TES-NTN-F-',
+  'tesouro direto - ntnb': 'TES-NTN-B-',
+  'tesouro direto - ntnb1': 'TES-NTN-B1-',
+  'tesouro direto - ntnbp': 'TES-NTN-B-P-',
+  'tesouro direto - ntnf': 'TES-NTN-F-',
 };
 
 const INDEXADOR_LABEL: Record<AssetIndexer, string> = {
-  cdi_mais_spread: 'CDI +',
-  cdi_percentual: '% CDI',
-  igpm_mais_spread: 'IGPM +',
-  ipca_mais_spread: 'IPCA +',
+  cdi_mais_spread: 'CDI + spread',
+  cdi_percentual: '% do CDI',
+  igpm_mais_spread: 'IGP-M + spread',
+  igpm_percentual: '% do IGP-M',
+  ipca_mais_spread: 'IPCA + spread',
   prefixado: 'Prefixado',
   ptxv: 'PTXV',
-  selic: 'Selic',
+  selic_mais_spread: 'Selic + spread',
+  selic_percentual: '% da Selic',
   tr: 'TR',
 };
+
+/**
+ * Formata a taxa contratada/spread como texto legivel, replicando a
+ * logica da coluna "Taxa escrita" da planilha gerencial do Btg (aba
+ * Export, coluna AC). Usada para montar o sufixo de taxa no Codigo
+ * Completo do titulo (ver buildCodigoCompleto abaixo).
+ *
+ * Diferente da planilha do Btg (que parte de um texto bruto do BTG e
+ * precisa "adivinhar" o indexador), aqui o indexador ja vem como enum
+ * tecnico escolhido no formulario — entao a logica e mais direta: so
+ * formata o numero no padrao certo para cada indexador.
+ */
+function formatTaxaTexto(tipoIndexador: AssetIndexer, taxa: number): string {
+  const taxaFmt = taxa.toFixed(2).replace('.', ',');
+  switch (tipoIndexador) {
+    case 'cdi_mais_spread':
+      return taxa === 0 ? 'CDI' : `CDI + ${taxaFmt}%`;
+    case 'cdi_percentual':
+      return taxa === 100 ? 'CDI' : `${taxaFmt}% do CDI`;
+    case 'igpm_mais_spread':
+      return taxa === 0 ? 'IGP-M' : `IGP-M + ${taxaFmt}%`;
+    case 'igpm_percentual':
+      return taxa === 100 ? '100% do IGP-M' : `${taxaFmt}% do IGP-M`;
+    case 'ipca_mais_spread':
+      return `IPCA + ${taxaFmt}%`;
+    case 'prefixado':
+      return `${taxaFmt}% a.a.`;
+    case 'ptxv':
+      return `PTXV + ${taxaFmt}%`;
+    case 'selic_mais_spread':
+      return `SELIC + ${taxaFmt}%`;
+    case 'selic_percentual':
+      return taxa === 100 ? 'SELIC' : `${taxaFmt}% da SELIC`;
+    case 'tr':
+      return `TR + ${taxaFmt}%`;
+    default:
+      return '';
+  }
+}
+
+/**
+ * Monta o "Codigo Completo" do titulo, replicando a coluna AD da planilha
+ * gerencial do Btg: Classe + Emissor + Codigo + Taxa (texto) + Vencimento.
+ * Esse e o campo usado como chave de busca no catalogo pelo formulario
+ * de Novo Ativo (ver findCatalogMatch em utils/assetClasses.ts).
+ */
+function buildCodigoCompleto(params: {
+  classe: RfClasse;
+  emissor: string;
+  codigo: string;
+  tipoIndexador: AssetIndexer;
+  taxa: number;
+  vencimento: string;
+}): string {
+  const taxaTexto = formatTaxaTexto(params.tipoIndexador, params.taxa);
+  const vencimentoFmt = params.vencimento
+    ? new Date(`${params.vencimento}T00:00:00`).toLocaleDateString('pt-BR')
+    : '';
+  return [CLASSE_LABEL[params.classe], params.emissor, params.codigo, taxaTexto, vencimentoFmt]
+    .filter(Boolean)
+    .join(' ')
+    .trim()
+    .toUpperCase();
+}
 
 const emptyForm: RfForm = {
   classe: 'cdb',
   codigo: '',
-  codigoCompleto: 'CDB-',
+  codigoCompleto: '',
   isin: '',
   emissor: '',
   cnpjEmissor: '',
   tipoIndexador: 'cdi_percentual',
+  taxa: '100',
   vencimento: '',
   dataEmissao: '',
   pagaCupom: false,
@@ -182,6 +262,16 @@ function parseMoney(value: string): number | undefined {
   return Number.isFinite(n) ? n : undefined;
 }
 
+function parseTaxaInput(value: string): number | undefined {
+  const t = value.trim();
+  if (!t) return undefined;
+  // Converte vírgula para ponto e preserva pontos existentes.
+  // Garante que 7,96 ou 7.96 virem exatamente 7.96 (sem multiplicar por 100!)
+  const clean = t.replace(',', '.');
+  const n = Number(clean);
+  return Number.isFinite(n) ? n : undefined;
+}
+
 function parseToIsoDate(value: unknown): string | undefined {
   const numericValue = typeof value === 'number'
     ? value
@@ -217,8 +307,15 @@ function parseToIsoDate(value: unknown): string | undefined {
   return undefined;
 }
 
+/**
+ * Normaliza um texto de cabecalho/chave para comparacao sem acento,
+ * sem caixa e sem qualquer caractere nao-alfanumerico (espacos, barras,
+ * parenteses, etc.). Essencial para que colunas com espaco no nome
+ * (ex: "Data Vencimento", "Taxa Compra") sejam acessadas corretamente
+ * como chaves do objeto JSON retornado por XLSX.utils.sheet_to_json.
+ */
 function normalizeKey(value: string): string {
-  return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase();
+  return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-zA-Z0-9]/g, '').trim().toLowerCase();
 }
 
 export default function BancoDadosRendaFixa() {
@@ -230,10 +327,30 @@ export default function BancoDadosRendaFixa() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [form, setForm] = useState<RfForm>(emptyForm);
+
+    const codigoCompletoCalculado = useMemo(() => {
+    const taxaNum = parseTaxaInput(form.taxa);
+    if (!form.codigo.trim() || !form.emissor.trim() || taxaNum === undefined) return '';
+    
+    const prefixo = CLASSE_PREFIX[form.classe];
+    const codigoLimpo = form.codigo.trim().toUpperCase();
+    // Verifica se já possui o prefixo (ex: CDB-CDB005IHZJF) para não duplicar
+    const codigoComPrefixo = codigoLimpo.startsWith(prefixo) ? codigoLimpo : `${prefixo}${codigoLimpo}`;
+
+    return buildCodigoCompleto({
+      classe: form.classe,
+      emissor: form.emissor.trim(),
+      codigo: codigoComPrefixo,
+      tipoIndexador: form.tipoIndexador,
+      taxa: taxaNum,
+      vencimento: form.vencimento,
+    });
+  }, [form.classe, form.emissor, form.codigo, form.tipoIndexador, form.taxa, form.vencimento]);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [recalcLoading, setRecalcLoading] = useState(false);
   const [importMessage, setImportMessage] = useState('');
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const btgFileInputRef = useRef<HTMLInputElement | null>(null);
 
   const addToast = (message: string, type: Toast['type'] = 'info') => {
     const id = `${Date.now()}-${Math.random()}`;
@@ -291,6 +408,9 @@ export default function BancoDadosRendaFixa() {
       emissor: row.emissor,
       cnpjEmissor: row.cnpjEmissor ?? '',
       tipoIndexador: row.tipoIndexador,
+      taxa: row.taxaContratada !== undefined
+        ? String(row.taxaContratada).replace('.', ',')
+        : (row.spreadContratado !== undefined ? String(row.spreadContratado).replace('.', ',') : ''),
       vencimento: row.vencimento,
       dataEmissao: row.dataEmissao ?? '',
       pagaCupom: row.pagaCupom,
@@ -298,7 +418,7 @@ export default function BancoDadosRendaFixa() {
       pagaAmortizacao: row.pagaAmortizacao ?? false,
       garantiaFGC: row.garantiaFGC ?? false,
       rating: row.rating ?? '',
-      valorMinimoInvestimento: row.valorMinimoInvestimento !== undefined ? String(row.valorMinimoInvestimento) : '',
+      valorMinimoInvestimento: row.valorMinimoInvestimento !== undefined ? String(row.valorMinimoInvestimento).replace('.', ',') : '',
     });
     setShowModal(true);
   };
@@ -306,31 +426,31 @@ export default function BancoDadosRendaFixa() {
   const closeModal = () => {
     setShowModal(false);
     setEditingId(null);
-    setForm(emptyForm);
   };
 
-  const handleCodeBlur = () => {
-    if (editingId) return;
-    const code = form.codigo.trim().toUpperCase();
-    if (!code) return;
-    
-    // Agora a exclusividade é pelo Código Completo. 
-    // Tentamos encontrar um registro que coincida com a classe atual + código digitado
-    const fullCodeMatch = `${CLASSE_PREFIX[form.classe]}${code}`;
+  const handleAutoFill = () => {
+    if (!form.codigoCompleto.trim()) {
+      addToast('Digite o Código Completo para buscar.', 'error');
+      return;
+    }
     const existing = store.rendasFixasReferencia.find(r => 
-      (r.codigoCompleto || `${CLASSE_PREFIX[r.classe as RfClasse]}${r.codigo}`).toUpperCase().replace(/\s+/g, '') === fullCodeMatch.toUpperCase().replace(/\s+/g, '')
+      r.codigoCompleto?.toLowerCase() === form.codigoCompleto.trim().toLowerCase()
     );
-    
-    if (!existing) return;
-
+    if (!existing) {
+      addToast('Título não encontrado no catálogo.', 'info');
+      return;
+    }
     setForm({
       classe: existing.classe as RfClasse,
       codigo: existing.codigo,
-      codigoCompleto: existing.codigoCompleto ?? `${CLASSE_PREFIX[existing.classe as RfClasse]}${existing.codigo}`,
+      codigoCompleto: existing.codigoCompleto ?? form.codigoCompleto,
       isin: existing.isin ?? '',
       emissor: existing.emissor,
       cnpjEmissor: existing.cnpjEmissor ?? '',
       tipoIndexador: existing.tipoIndexador,
+      taxa: existing.taxaContratada !== undefined
+        ? String(existing.taxaContratada).replace('.', ',')
+        : (existing.spreadContratado !== undefined ? String(existing.spreadContratado).replace('.', ',') : ''),
       vencimento: existing.vencimento,
       dataEmissao: existing.dataEmissao ?? '',
       pagaCupom: existing.pagaCupom,
@@ -338,25 +458,35 @@ export default function BancoDadosRendaFixa() {
       pagaAmortizacao: existing.pagaAmortizacao ?? false,
       garantiaFGC: existing.garantiaFGC ?? false,
       rating: existing.rating ?? '',
-      valorMinimoInvestimento: existing.valorMinimoInvestimento !== undefined ? String(existing.valorMinimoInvestimento) : '',
+      valorMinimoInvestimento: existing.valorMinimoInvestimento !== undefined ? String(existing.valorMinimoInvestimento).replace('.', ',') : '',
     });
     addToast('Dados preenchidos automaticamente com base no Código Completo.', 'info');
   };
 
   const handleSave = () => {
-    if (!form.codigo.trim() || !form.emissor.trim() || !form.vencimento || !form.codigoCompleto.trim()) {
-      addToast('Preencha os campos obrigatorios: Classe, Codigo, Codigo Completo, Emissor e Vencimento.', 'error');
+    const taxaNum = parseTaxaInput(form.taxa);
+    if (!form.codigo.trim() || !form.emissor.trim() || !form.vencimento || taxaNum === undefined) {
+      addToast('Preencha os campos obrigatorios: Classe, Codigo, Emissor, Indexador, Taxa e Vencimento.', 'error');
       return;
     }
 
+    const spreadIndexadores: AssetIndexer[] = ['cdi_mais_spread', 'ipca_mais_spread', 'igpm_mais_spread', 'selic_mais_spread'];
+    const usaSpread = spreadIndexadores.includes(form.tipoIndexador);
+
+    const prefixo = CLASSE_PREFIX[form.classe];
+    const codigoLimpo = form.codigo.trim().toUpperCase();
+    const codigoComPrefixo = codigoLimpo.startsWith(prefixo) ? codigoLimpo : `${prefixo}${codigoLimpo}`;
+
     const payload: Partial<Omit<RendaFixaReferencia, 'id' | 'createdAt'>> = {
       classe: form.classe,
-      codigo: form.codigo.trim().toUpperCase(),
-      codigoCompleto: form.codigoCompleto.trim().toUpperCase(),
+      codigo: codigoComPrefixo,
+      codigoCompleto: codigoCompletoCalculado.trim().toUpperCase(),
       isin: form.isin.trim().toUpperCase() || undefined,
       emissor: form.emissor.trim(),
       cnpjEmissor: form.cnpjEmissor.trim() ? formatCnpj(form.cnpjEmissor) : undefined,
       tipoIndexador: form.tipoIndexador,
+      taxaContratada: !usaSpread ? taxaNum : undefined,
+      spreadContratado: usaSpread ? taxaNum : undefined,
       vencimento: form.vencimento,
       dataEmissao: form.dataEmissao || undefined,
       pagaCupom: form.pagaCupom,
@@ -395,7 +525,7 @@ export default function BancoDadosRendaFixa() {
     addToast('Todos os ativos de Renda Fixa foram excluídos.', 'info');
   };
 
-  const handleDownloadTemplate = () => {
+    const handleDownloadTemplate = () => {
     const rows = [
       {
         Classe: 'cdb',
@@ -405,6 +535,7 @@ export default function BancoDadosRendaFixa() {
         Emissor: 'BANCO ABC BRASIL',
         CNPJEmissor: '17.382.465/0001-22',
         Indexador: 'cdi_percentual',
+        TaxaContratada: 110,
         Vencimento: '20/06/2029',
         DataEmissao: '20/06/2024',
         PagaCupom: 'nao',
@@ -422,6 +553,7 @@ export default function BancoDadosRendaFixa() {
         Emissor: 'BTG COMMODITIES S.A.',
         CNPJEmissor: '00.000.000/0000-00',
         Indexador: 'ipca_mais_spread',
+        TaxaContratada: 7.96,
         Vencimento: '15/07/2033',
         DataEmissao: '10/01/2023',
         PagaCupom: 'sim',
@@ -439,6 +571,7 @@ export default function BancoDadosRendaFixa() {
         Emissor: 'TESOURO NACIONAL',
         CNPJEmissor: '00.000.000/0001-91',
         Indexador: 'selic',
+        TaxaContratada: 100,
         Vencimento: '01/03/2029',
         DataEmissao: '01/03/2024',
         PagaCupom: 'nao',
@@ -459,6 +592,7 @@ export default function BancoDadosRendaFixa() {
       ['Emissor', 'Sim', 'Nome do emissor do titulo (ex: BTG COMMODITIES).'],
       ['CNPJEmissor', 'Nao', 'CNPJ do emissor do titulo.'],
       ['Indexador', 'Sim', 'cdi_mais_spread, cdi_percentual, igpm_mais_spread, ipca_mais_spread, prefixado, ptxv, selic, tr'],
+      ['TaxaContratada', 'Sim', 'Taxa ou spread contratado na emissao do titulo (ex: 110 para 110% CDI, ou 7,96 para IPCA+7,96%).'],
       ['Vencimento', 'Sim', 'Data de vencimento em DD/MM/AAAA.'],
       ['DataEmissao', 'Nao', 'Data de emissao em DD/MM/AAAA.'],
       ['PagaCupom', 'Nao', 'sim ou nao. Padrao: nao.'],
@@ -485,17 +619,17 @@ export default function BancoDadosRendaFixa() {
       if (!sheet) throw new Error('invalid_sheet');
       const rowsJson = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: '' });
 
-      let skipped = 0;
+            let skipped = 0;
       const itemsToUpsert: Omit<RendaFixaReferencia, 'id' | 'createdAt'>[] = [];
       
-      const allPossibleClasses = ['cdb', 'cdca', 'compromissada', 'coe', 'cpr', 'cra', 'cri', 'debenture', 'lcd', 'lca', 'lci', 'lf', 'lfsn', 'lfsc', 'lft', 'lig', 'ltf', 'ltn', 'ntn-b', 'ntn-b-p', 'ntn-b1', 'ntn-f', 'tesouro direto - lft', 'tesouro direto - ltn', 'tesouro direto - ntn-b', 'tesouro direto - ntn-b1', 'tesouro direto - ntn-b-p', 'tesouro direto - ntn-f'];
+      const allPossibleClasses = ['cdb', 'cdca', 'compromissada', 'coe', 'cpr', 'cra', 'cri', 'debenture', 'lcd', 'lca', 'lci', 'lf', 'lfsn', 'lfsc', 'lft', 'lig', 'ltf', 'ltn', 'ntnb', 'ntnbp', 'ntnb1', 'ntnf', 'tesouro direto - lft', 'tesouro direto - ltn', 'tesouro direto - ntnb', 'tesouro direto - ntnb1', 'tesouro direto - ntnbp', 'tesouro direto - ntnf'];
 
       for (const row of rowsJson) {
         const normalized: Record<string, unknown> = {};
         for (const [k, v] of Object.entries(row)) normalized[normalizeKey(k)] = v;
 
         const classeRaw = normalizeKey(String(normalized.classe ?? ''));
-        const classe = allPossibleClasses.find(c => c === classeRaw) as RfClasse | undefined;
+        const classe = allPossibleClasses.find(c => c.replace(/[^a-z0-9]/g, '') === classeRaw.replace(/[^a-z0-9]/g, '')) as RfClasse | undefined;
         const codigo = String(normalized.codigo ?? '').trim().toUpperCase();
         const codigoCompleto = String(normalized.codigocompleto ?? '').trim();
         const emissor = String(normalized.emissor ?? '').trim();
@@ -512,10 +646,13 @@ export default function BancoDadosRendaFixa() {
           cdi_mais_spread: 'cdi_mais_spread',
           cdi_percentual: 'cdi_percentual',
           igpm_mais_spread: 'igpm_mais_spread',
+          igpm_percentual: 'igpm_percentual',
           ipca_mais_spread: 'ipca_mais_spread',
           prefixado: 'prefixado',
           ptxv: 'ptxv',
-          selic: 'selic',
+          selic_mais_spread: 'selic_mais_spread',
+          selic_percentual: 'selic_percentual',
+          selic: 'selic_percentual',
           tr: 'tr',
         };
         const tipoIndexador = indexadorMap[indexadorRaw] ?? 'cdi_percentual';
@@ -525,6 +662,13 @@ export default function BancoDadosRendaFixa() {
         const dataEmissao = parseToIsoDate(normalized.dataemissao);
         const rating = String(normalized.rating ?? '').trim().toUpperCase() || undefined;
         const minInvest = parseSheetNumber(normalized.valorminimoinvestimento ?? normalized.valorminimo ?? '');
+        
+        // Extrai a taxa contratada da planilha
+        const taxaRaw = parseSheetNumber(normalized.taxacontratada ?? normalized.taxa ?? '');
+        const taxaContratadaVal = Number.isFinite(taxaRaw) ? taxaRaw : 0;
+
+        const spreadIndexadores: AssetIndexer[] = ['cdi_mais_spread', 'ipca_mais_spread', 'igpm_mais_spread', 'selic_mais_spread'];
+        const usaSpread = spreadIndexadores.includes(tipoIndexador);
 
         const cupomRaw = normalizeKey(String(normalized.pagacupom ?? 'nao'));
         const pagaCupom = ['sim', 'yes', 'true', '1'].includes(cupomRaw);
@@ -547,6 +691,8 @@ export default function BancoDadosRendaFixa() {
           emissor,
           cnpjEmissor,
           tipoIndexador,
+          taxaContratada: !usaSpread ? taxaContratadaVal : undefined,
+          spreadContratado: usaSpread ? taxaContratadaVal : undefined,
           vencimento,
           dataEmissao,
           pagaCupom,
@@ -575,6 +721,186 @@ export default function BancoDadosRendaFixa() {
 
   const handleImportClick = () => {
     fileInputRef.current?.click();
+  };
+
+  /**
+   * Interpreta a coluna "Indexador" + "Taxa Compra" da planilha gerencial
+   * de Renda Fixa do Btg (Relatorios > Paineis > Renda Fixa), retornando
+   * o AssetIndexer e a taxa/spread correspondente.
+   *
+   * Regra validada empiricamente contra a planilha real do Btg (27 mil+
+   * linhas, cobertura de 100%):
+   *  - "PRE" / "100% PRE"           -> prefixado
+   *  - "TR" / "100% TR"             -> tr
+   *  - "PTXV" / "100% PTXV"         -> ptxv
+   *  - "X% IPCA" / "IPCA" (X<40)    -> ipca_mais_spread, taxa = Taxa Compra
+   *  - "X% IGP-M" / "IGP-M" (X<40)  -> igpm_mais_spread, taxa = Taxa Compra
+   *    (IPCA e IGP-M no Btg SEMPRE representam indexador+spread, mesmo
+   *    quando aparecem como "100% IPCA" — o "100%" ai e so um padrao de
+   *    exibicao do extrato, nao um percentual real. Excecao: taxa >= 40
+   *    e tratada como percentual explicito, para cobrir ruido raro de
+   *    consulta como o caso real do titulo DEB-CVRDA6.)
+   *  - "X% CDI", X != 100           -> cdi_percentual, taxa = X (do texto)
+   *  - "100% CDI" / "CDI", TaxaCompra = 0     -> cdi_percentual, taxa = 100
+   *  - "100% CDI" / "CDI", TaxaCompra != 0    -> cdi_mais_spread, taxa = Taxa Compra
+   *  - mesma logica para SELIC
+   */
+  function parseBtgIndexador(indexadorTexto: string, taxaCompra: number): { tipoIndexador: AssetIndexer; taxa: number } | null {
+    const texto = indexadorTexto.trim();
+    const taxa = Number.isFinite(taxaCompra) ? taxaCompra : 0;
+
+    if (texto === 'PRE' || texto === '100% PRE') return { tipoIndexador: 'prefixado', taxa };
+    if (texto === 'TR' || texto === '100% TR') return { tipoIndexador: 'tr', taxa };
+    if (texto === 'PTXV' || texto === '100% PTXV') return { tipoIndexador: 'ptxv', taxa };
+
+    const match = texto.match(/^([\d.]+)%\s*(CDI|SELIC|IPCA|IGP-M)$/i) ?? texto.match(/^(CDI|SELIC|IPCA|IGP-M)$/i);
+    if (!match) return null;
+
+    let percentual: number;
+    let indexador: string;
+    if (match.length === 3) {
+      percentual = Number(match[1]);
+      indexador = match[2].toUpperCase();
+    } else {
+      percentual = 100;
+      indexador = match[1].toUpperCase();
+    }
+
+    if (indexador === 'IPCA' || indexador === 'IGP-M') {
+      const base = indexador === 'IPCA' ? 'ipca' : 'igpm';
+      // Limiar de 40: cobre o caso raro de percentual explicito alto
+      // (ex: DEB-CVRDA6, que aparece com taxa 100 em algumas linhas),
+      // sem afetar nenhum spread real da base (todos < 40 na pratica).
+      if (percentual !== 100 || taxa >= 40) {
+        return { tipoIndexador: `${base}_percentual` as AssetIndexer, taxa: percentual !== 100 ? percentual : taxa };
+      }
+      return { tipoIndexador: `${base}_mais_spread` as AssetIndexer, taxa };
+    }
+
+    if (indexador === 'CDI' || indexador === 'SELIC') {
+      const base = indexador === 'CDI' ? 'cdi' : 'selic';
+      if (percentual === 100 && taxa !== 0 && taxa < 40) {
+        return { tipoIndexador: `${base}_mais_spread` as AssetIndexer, taxa };
+      }
+      return { tipoIndexador: `${base}_percentual` as AssetIndexer, taxa: percentual !== 100 ? percentual : (taxa >= 40 ? taxa : 100) };
+    }
+
+    return null;
+  }
+/**
+   * Importa a planilha gerencial de Renda Fixa do Btg (Relatorios >
+   * Paineis > Renda Fixa), tratando os dados brutos do extrato (que vem
+   * em uma unica aba, sem as colunas calculadas) para o formato do
+   * catalogo do sistema — equivalente as formulas que o usuario usava
+   * manualmente em planilha auxiliar antes desta funcionalidade existir.
+   *
+   * Cada linha do extrato e uma posicao de cliente, nao um titulo unico
+   * — varios clientes podem ter o mesmo titulo. Por isso, agrupamos por
+   * Codigo Completo calculado antes de fazer o upsert, para nao
+   * processar o mesmo titulo centenas de vezes.
+   */
+    const handleImportBtgFile = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    try {
+      const wb = XLSX.read(await file.arrayBuffer(), { type: 'array' });
+      const sheet = wb.Sheets[wb.SheetNames[0]];
+      if (!sheet) throw new Error('invalid_sheet');
+      const rowsJson = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: '' });
+
+      const allPossibleClasses = ['cdb', 'cdca', 'compromissada', 'coe', 'cpr', 'cra', 'cri', 'debenture', 'lcd', 'lca', 'lci', 'lf', 'lfsn', 'lfsc', 'lft', 'lig', 'ltf', 'ltn', 'ntnb', 'ntnbp', 'ntnb1', 'ntnf', 'tesouro direto - lft', 'tesouro direto - ltn', 'tesouro direto - ntnb', 'tesouro direto - ntnb1', 'tesouro direto - ntnbp', 'tesouro direto - ntnf'];
+
+      // Agrupa por Codigo Completo: o extrato tem 1 linha por posicao de
+      // cliente, mas queremos 1 registro por titulo no catalogo.
+      const porCodigoCompleto = new Map<string, Omit<RendaFixaReferencia, 'id' | 'createdAt'>>();
+      let skipped = 0;
+
+      for (const row of rowsJson) {
+        const normalized: Record<string, unknown> = {};
+        for (const [k, v] of Object.entries(row)) normalized[normalizeKey(k)] = v;
+
+        const produtoRaw = normalizeKey(String(normalized.produto ?? ''));
+        const classe = allPossibleClasses.find(c => c.replace(/[^a-z0-9]/g, '') === produtoRaw) as RfClasse | undefined;
+        const ativo = String(normalized.ativo ?? '').trim().toUpperCase();
+        const emissor = String(normalized.emissor ?? '').trim();
+        const vencimento = parseToIsoDate(normalized.datavencimento);
+        const indexadorTexto = String(normalized.indexador ?? '').trim();
+        const taxaCompra = parseSheetNumber(normalized.taxacompra);
+
+        if (!classe || !ativo || !emissor || !vencimento || !indexadorTexto) {
+          skipped += 1;
+          continue;
+        }
+
+                // Codigo: Mantém exatamente o valor original da planilha do Btg 
+        // (ex: "CDB-CDB005IHZJF"), sem remover o prefixo.
+        const codigo = ativo;
+
+        const indexadorInfo = parseBtgIndexador(indexadorTexto, Number.isFinite(taxaCompra) ? taxaCompra : 0);
+        if (!indexadorInfo) {
+          skipped += 1;
+          continue;
+        }
+
+        const codigoCompleto = buildCodigoCompleto({
+          classe,
+          emissor,
+          codigo: ativo,
+          tipoIndexador: indexadorInfo.tipoIndexador,
+          taxa: indexadorInfo.taxa,
+          vencimento,
+        });
+        if (!codigoCompleto) {
+          skipped += 1;
+          continue;
+        }
+
+        const spreadIndexadores: AssetIndexer[] = ['cdi_mais_spread', 'ipca_mais_spread', 'igpm_mais_spread', 'selic_mais_spread'];
+        const usaSpread = spreadIndexadores.includes(indexadorInfo.tipoIndexador);
+
+        // Upsert local: se o mesmo titulo aparecer em multiplas linhas
+        // (posicoes de clientes diferentes), a ultima processada "ganha"
+        // — na pratica os dados do titulo sao identicos entre elas.
+        porCodigoCompleto.set(codigoCompleto, {
+          classe,
+          codigo,
+          codigoCompleto,
+          isin: undefined,
+          emissor,
+          cnpjEmissor: undefined,
+          tipoIndexador: indexadorInfo.tipoIndexador,
+          taxaContratada: !usaSpread ? indexadorInfo.taxa : undefined,
+          spreadContratado: usaSpread ? indexadorInfo.taxa : undefined,
+          vencimento,
+          dataEmissao: undefined,
+          pagaCupom: false,
+          periodicidadeCupom: undefined,
+          pagaAmortizacao: false,
+          garantiaFGC: false,
+          rating: undefined,
+          valorMinimoInvestimento: undefined,
+          atualizadoEm: new Date().toISOString(),
+        });
+      }
+
+      const itemsToUpsert = Array.from(porCodigoCompleto.values());
+      if (itemsToUpsert.length > 0) {
+        store.bulkUpsertRendaFixaReferencia(itemsToUpsert);
+      }
+
+      setImportMessage(`Importacao Btg concluida: ${itemsToUpsert.length} titulo(s) unico(s) processado(s) (de ${rowsJson.length} posicoes lidas), ${skipped} linha(s) ignorada(s).`);
+      addToast(`Catalogo atualizado a partir da planilha do Btg: ${itemsToUpsert.length} titulo(s).`, 'success');
+    } catch (error) {
+      console.error('Erro ao importar planilha do Btg:', error);
+      addToast('Erro ao importar planilha do Btg.', 'error');
+    } finally {
+      event.target.value = '';
+    }
+  };
+
+  const handleImportBtgClick = () => {
+    btgFileInputRef.current?.click();
   };
 
   const parseSheetNumber = (value: unknown): number => {
@@ -683,17 +1009,55 @@ export default function BancoDadosRendaFixa() {
             <button onClick={handleDownloadTemplate} className="px-3 py-2 border border-blue-300 text-blue-700 rounded-lg text-sm hover:bg-blue-50 flex items-center gap-1"><Download size={14} /> Modelo</button>
             <button onClick={handleImportClick} className="px-3 py-2 border border-green-300 text-green-700 rounded-lg text-sm hover:bg-green-50 flex items-center gap-1"><Upload size={14} /> Importar</button>
             <input ref={fileInputRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={handleImportFile} />
+            <button
+              onClick={handleImportBtgClick}
+              title="Importar planilha do Btg: Relatorios > Paineis > Renda Fixa"
+              className="px-3 py-2 border border-amber-300 text-amber-700 rounded-lg text-sm hover:bg-amber-50 flex items-center gap-1"
+            >
+              <Upload size={14} /> Importar Btg
+            </button>
+            <input ref={btgFileInputRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={handleImportBtgFile} />
           </div>
           {importMessage && <p className="text-xs text-indigo-700">{importMessage}</p>}
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
-          {(['all', 'cdb', 'cri', 'cra', 'debenture', 'coe'] as const).map(c => (
+                <div className="flex flex-wrap items-center gap-1.5">
+          {([
+            'all',
+            'cdb',
+            'cdca',
+            'compromissada',
+            'coe',
+            'cpr',
+            'cra',
+            'cri',
+            'debenture',
+            'lcd',
+            'lca',
+            'lci',
+            'lf',
+            'lfsn',
+            'lfsc',
+            'lft',
+            'lig',
+            'ltf',
+            'ltn',
+            'ntnb',
+            'ntnbp',
+            'ntnb1',
+            'ntnf',
+            'tesouro direto - lft',
+            'tesouro direto - ltn',
+            'tesouro direto - ntnb',
+            'tesouro direto - ntnb1',
+            'tesouro direto - ntnbp',
+            'tesouro direto - ntnf',
+          ] as const).map(c => (
             <button
               key={c}
               onClick={() => setClasseFilter(c)}
-              className={`px-2.5 py-1.5 rounded border text-xs font-medium ${
-                classeFilter === c ? 'bg-indigo-50 border-indigo-300 text-indigo-700' : 'bg-gray-50 border-gray-300 text-gray-600'
+              className={`px-2 py-1 rounded border text-[11px] font-medium transition-colors ${
+                classeFilter === c ? 'bg-indigo-50 border-indigo-300 text-indigo-700 font-bold' : 'bg-gray-50 border-gray-200 text-gray-600 hover:bg-gray-100'
               }`}
             >
               {c === 'all' ? 'Todos' : CLASSE_LABEL[c]}
@@ -702,15 +1066,17 @@ export default function BancoDadosRendaFixa() {
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          {([
+{([
             'all',
             'cdi_mais_spread',
             'cdi_percentual',
             'igpm_mais_spread',
+            'igpm_percentual',
             'ipca_mais_spread',
             'prefixado',
             'ptxv',
-            'selic',
+            'selic_mais_spread',
+            'selic_percentual',
             'tr',
           ] as const).map(i => (
             <button
@@ -720,23 +1086,7 @@ export default function BancoDadosRendaFixa() {
                 indexFilter === i ? 'bg-indigo-50 border-indigo-300 text-indigo-700' : 'bg-gray-50 border-gray-300 text-gray-600'
               }`}
             >
-              {i === 'all'
-                ? 'Todos'
-                : i === 'cdi_mais_spread'
-                  ? 'CDI+'
-                  : i === 'cdi_percentual'
-                    ? 'CDI%'
-                    : i === 'igpm_mais_spread'
-                      ? 'IGPM+'
-                      : i === 'ipca_mais_spread'
-                        ? 'IPCA+'
-                        : i === 'prefixado'
-                          ? 'Prefixado'
-                          : i === 'ptxv'
-                            ? 'PTXV'
-                            : i === 'selic'
-                              ? 'Selic'
-                              : 'TR'}
+              {i === 'all' ? 'Todos' : INDEXADOR_LABEL[i]}
             </button>
           ))}
         </div>
@@ -848,7 +1198,7 @@ export default function BancoDadosRendaFixa() {
                     }}
                     className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
                   >
-                    <option value="cdb">CDB</option>
+                                        <option value="cdb">CDB</option>
                     <option value="cdca">CDCA</option>
                     <option value="compromissada">Compromissada</option>
                     <option value="coe">COE</option>
@@ -866,16 +1216,16 @@ export default function BancoDadosRendaFixa() {
                     <option value="lig">LIG</option>
                     <option value="ltf">LTF</option>
                     <option value="ltn">LTN</option>
-                    <option value="ntn-b">NTN-B</option>
-                    <option value="ntn-b-p">NTN-B-P</option>
-                    <option value="ntn-b1">NTN-B1</option>
-                    <option value="ntn-f">NTN-F</option>
+                    <option value="ntnb">NTN-B</option>
+                    <option value="ntnbp">NTN-B-P</option>
+                    <option value="ntnb1">NTN-B1</option>
+                    <option value="ntnf">NTN-F</option>
                     <option value="tesouro direto - lft">Tesouro Direto - LFT</option>
                     <option value="tesouro direto - ltn">Tesouro Direto - LTN</option>
-                    <option value="tesouro direto - ntn-b">Tesouro Direto - NTN-B</option>
-                    <option value="tesouro direto - ntn-b1">Tesouro Direto - NTN-B1</option>
-                    <option value="tesouro direto - ntn-b-p">Tesouro Direto - NTN-B-P</option>
-                    <option value="tesouro direto - ntn-f">Tesouro Direto - NTN-F</option>
+                    <option value="tesouro direto - ntnb">Tesouro Direto - NTN-B</option>
+                    <option value="tesouro direto - ntnb1">Tesouro Direto - NTN-B1</option>
+                    <option value="tesouro direto - ntnbp">Tesouro Direto - NTN-B-P</option>
+                    <option value="tesouro direto - ntnf">Tesouro Direto - NTN-F</option>
                   </select>
                 </div>
                 <div>
@@ -883,18 +1233,16 @@ export default function BancoDadosRendaFixa() {
                   <input
                     value={form.codigo}
                     onChange={(e: ChangeEvent<HTMLInputElement>) => setForm(prev => ({ ...prev, codigo: e.target.value.toUpperCase().replace(/\s+/g, '') }))}
-                    onBlur={handleCodeBlur}
                     placeholder="CRA02300CYT"
                     className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs text-gray-500 mb-1">Codigo Completo *</label>
+                  <label className="block text-xs text-gray-500 mb-1">Codigo Completo (calculado)</label>
                   <input
-                    value={form.codigoCompleto}
-                    onChange={(e: ChangeEvent<HTMLInputElement>) => setForm(prev => ({ ...prev, codigoCompleto: e.target.value.toUpperCase() }))}
-                    placeholder="Ex: CDB-123ABC"
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                    value={codigoCompletoCalculado || 'Preencha Codigo, Emissor, Indexador, Taxa e Vencimento'}
+                    disabled
+                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-gray-50 text-gray-500"
                   />
                 </div>
                 <div>
@@ -928,24 +1276,45 @@ export default function BancoDadosRendaFixa() {
 
             <section className="space-y-3">
               <h4 className="text-sm font-bold text-gray-700">Caracteristicas do Titulo</h4>
-              <div>
-                <label className="block text-xs text-gray-500 mb-1">Indexador *</label>
-                <select
-                  value={form.tipoIndexador}
-                  onChange={(e: ChangeEvent<HTMLSelectElement>) => setForm(prev => ({ ...prev, tipoIndexador: e.target.value as AssetIndexer }))}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                >
-                  <option value="cdi_mais_spread">CDI + Spread (ex: CDI + 2%)</option>
-                  <option value="cdi_percentual">% do CDI (ex: 120%)</option>
-                  <option value="igpm_mais_spread">IGPM + Spread (ex: IGPM + 4%)</option>
-                  <option value="ipca_mais_spread">IPCA + Spread (ex: IPCA + 5%)</option>
-                  <option value="prefixado">Prefixado (% a.a.)</option>
-                  <option value="ptxv">PTXV (Prefixado com Taxa Variável)</option>
-                  <option value="selic">Selic</option>
-                  <option value="tr">TR (Taxa Referencial)</option>
-                </select>
-                <p className="mt-1 text-xs text-blue-700 flex items-center gap-1"><Info size={12} /> A taxa contratada de cada cliente e definida no cadastro do ativo na carteira.</p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">Indexador *</label>
+                  <select
+                    value={form.tipoIndexador}
+                    onChange={(e: ChangeEvent<HTMLSelectElement>) => setForm(prev => ({ ...prev, tipoIndexador: e.target.value as AssetIndexer }))}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                  >
+                    <option value="cdi_mais_spread">CDI + Spread (ex: CDI + 2%)</option>
+                    <option value="cdi_percentual">% do CDI (ex: 120%)</option>
+                    <option value="igpm_mais_spread">IGP-M + Spread (ex: IGP-M + 4%)</option>
+                    <option value="igpm_percentual">% do IGP-M (ex: 100%)</option>
+                    <option value="ipca_mais_spread">IPCA + Spread (ex: IPCA + 5%)</option>
+                    <option value="prefixado">Prefixado (% a.a.)</option>
+                    <option value="ptxv">PTXV (Prefixado com Taxa Variável)</option>
+                    <option value="selic_mais_spread">Selic + Spread (ex: Selic + 1%)</option>
+                    <option value="selic_percentual">% da Selic (ex: 100%)</option>
+                    <option value="tr">TR (Taxa Referencial)</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">
+                    {form.tipoIndexador.endsWith('_mais_spread')
+                      ? 'Spread contratado (% a.a.) *'
+                      : form.tipoIndexador === 'prefixado'
+                        ? 'Taxa contratada (% a.a.) *'
+                        : 'Percentual contratado (%) *'}
+                  </label>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    value={form.taxa}
+                    onChange={(e: ChangeEvent<HTMLInputElement>) => setForm(prev => ({ ...prev, taxa: e.target.value }))}
+                    placeholder="Ex: 2 ou 102"
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                  />
+                </div>
               </div>
+              <p className="text-xs text-blue-700 flex items-center gap-1"><Info size={12} /> Indexador e taxa sao caracteristicas do titulo na emissao — o mesmo para qualquer cliente que o adquirir. A isencao de IR continua sendo definida no cadastro do ativo na carteira.</p>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>

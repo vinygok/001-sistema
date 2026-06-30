@@ -4,6 +4,20 @@ export interface Client {
   account: string;
   institution: string;
   cpf: string;
+  escritorioId?: string; // Ex: "miura", "cx3"
+  assessorId?: string;   // ID do assessor que atende
+  createdAt: string;
+}
+
+export type UserRole = 'master_geral' | 'escritorio_master' | 'assessor' | 'cliente_final';
+
+export interface AppUser {
+  id: string;
+  name: string;
+  email: string;
+  role: UserRole;
+  escritorioId?: string; // Usado para escritorio_master e assessor
+  allowedClientIds?: string[]; // Usado para cliente_final (sua conta e/ou do filho)
   createdAt: string;
 }
 
@@ -36,10 +50,13 @@ export type AssetIndexer =
   | 'cdi_mais_spread'    // CDI + spread ao ano, ex: CDI + 2% a.a.
   | 'cdi_percentual'     // percentual do CDI, ex: 120% do CDI
   | 'igpm_mais_spread'   // IGPM + spread ao ano, ex: IGPM + 4% a.a.
+  | 'igpm_percentual'    // percentual do IGPM, ex: 100% IGPM
   | 'ipca_mais_spread'   // IPCA + spread ao ano, ex: IPCA + 5% a.a.
   | 'prefixado'          // taxa prefixada ao ano, ex: 14.5% a.a.
   | 'ptxv'               // Prefixado com Taxa Variável
-  | 'selic'              // percentual da Selic, ex: 100% Selic
+  | 'selic'              // percentual da Selic (legado)
+  | 'selic_mais_spread'  // Selic + spread ao ano
+  | 'selic_percentual'   // percentual da Selic, ex: 100% Selic
   | 'tr';                // atrelado à TR (ex: caderneta)
 
 export type MovementType =
@@ -254,6 +271,8 @@ export interface RendaFixaReferencia {
 
   // Indexador (caracteristica do titulo - NAO a taxa do cliente)
   tipoIndexador: AssetIndexer;
+  taxaContratada?: number;
+  spreadContratado?: number;
 
   // Vencimento
   vencimento: string;

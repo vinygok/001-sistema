@@ -112,10 +112,16 @@ if (row.action === 'criar') {
             referenciaRFId: catalogMatch.source === 'rf' ? catalogMatch.referenciaId : undefined,
             dataVencimento: catalogMatch.source === 'rf' ? catalogMatch.vencimentoRF : undefined,
             tipoIndexador: catalogMatch.source === 'rf' ? catalogMatch.tipoIndexadorRF : undefined,
-            // Taxa contratada: unico campo de RF que vem do extrato
-            // (a mesma coluna usada para montar o nome do ativo),
-            // nunca do catalogo.
-            taxaContratada: catalogMatch.source === 'rf' ? row.taxaContratada : undefined,
+            // Taxa contratada/spread: agora e caracteristica do titulo no
+            // catalogo (Banco de Dados > Renda Fixa) — prioridade maxima.
+            // So cai para o valor extraido do extrato (row.taxaContratada)
+            // se o catalogo nao tiver essa informacao preenchida ainda.
+            taxaContratada: catalogMatch.source === 'rf'
+              ? (catalogMatch.taxaContratadaRF !== undefined || catalogMatch.spreadContratadoRF !== undefined
+                  ? catalogMatch.taxaContratadaRF
+                  : row.taxaContratada)
+              : undefined,
+            spreadContratado: catalogMatch.source === 'rf' ? catalogMatch.spreadContratadoRF : undefined,
             valorPosicao: row.importValue,
             currentValue: row.importValue,
             moeda: 'BRL',
