@@ -6,18 +6,7 @@
  * O estado é mantido em memória (`storeData`) e persistido no localStorage.
  * Qualquer componente que chame `useStore()` recebe um re-render automático
  * sempre que o estado for alterado via `updateStore()`.
- *
- * Seções:
- *  1. Imports e tipos internos
- *  2. Estado inicial e persistência (localStorage)
- *  3. Helpers internos
- *  4. Singleton + sistema de listeners
- *  5. Hook `useStore` com todas as actions
  */
-
-// =============================================================================
-// 1. Imports e tipos internos
-// =============================================================================
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { v4 as uuidv4 } from 'uuid';
@@ -35,6 +24,7 @@ import type {
   FundoReferencia,
   RendaFixaReferencia,
   AppUser,
+  EscritorioParceiro,
 } from '../types';
 
 // Chaves de persistência
@@ -43,6 +33,7 @@ const LEGACY_STORAGE_KEY = 'investment_portfolio_v1';
 
 /** Formato completo dos dados armazenados */
 interface StoreData {
+  escritorios: EscritorioParceiro[];
   users: AppUser[];
   currentUserId: string | null;
   clients: Client[];
@@ -64,22 +55,28 @@ interface StoreData {
 // 2. Estado inicial, IndexedDB Engine e Persistência Híbrida Multi-Camada
 // =============================================================================
 
+const defaultEscritorios: EscritorioParceiro[] = [
+  { id: 'miura', name: 'Miura Investimentos', ativo: true, createdAt: '2026-01-01T00:00:00.000Z' },
+  { id: 'cx3', name: 'CX3 Investimentos', ativo: true, createdAt: '2026-01-02T00:00:00.000Z' },
+];
+
 const defaultUsers: AppUser[] = [
-  { id: 'master-1', name: 'Master Geral', email: 'master@meroscapital.com', role: 'master_geral', createdAt: '2026-01-01T00:00:00.000Z' },
-  { id: 'miura-master', name: 'Miura Gestor Master', email: 'gestor@miurainvestimentos.com', role: 'escritorio_master', escritorioId: 'miura', createdAt: '2026-01-02T00:00:00.000Z' },
-  { id: 'miura-assessor-1', name: 'Carlos (Assessor Miura)', email: 'carlos@miurainvestimentos.com', role: 'assessor', escritorioId: 'miura', createdAt: '2026-01-03T00:00:00.000Z' },
-  { id: 'cx3-master', name: 'CX3 Gestor Master', email: 'gestor@cx3investimentos.com', role: 'escritorio_master', escritorioId: 'cx3', createdAt: '2026-01-04T00:00:00.000Z' },
-  { id: 'cx3-assessor-1', name: 'Fernanda (Assessor CX3)', email: 'fernanda@cx3investimentos.com', role: 'assessor', escritorioId: 'cx3', createdAt: '2026-01-05T00:00:00.000Z' },
-  { id: 'cliente-1', name: 'João Silva (Investidor Auto-service)', email: 'joao@silva.com', role: 'cliente_final', allowedClientIds: ['client-joao-1', 'client-filho-1'], createdAt: '2026-01-06T00:00:00.000Z' },
+  { id: 'master-1', name: 'Master Geral', email: 'master@meroscapital.com', role: 'master_geral', ativo: true, createdAt: '2026-01-01T00:00:00.000Z' },
+  { id: 'miura-master', name: 'Miura Gestor Master', email: 'gestor@miurainvestimentos.com', role: 'escritorio_master', escritorioId: 'miura', ativo: true, createdAt: '2026-01-02T00:00:00.000Z' },
+  { id: 'miura-assessor-1', name: 'Carlos (Assessor Miura)', email: 'carlos@miurainvestimentos.com', role: 'assessor', escritorioId: 'miura', ativo: true, createdAt: '2026-01-03T00:00:00.000Z' },
+  { id: 'cx3-master', name: 'CX3 Gestor Master', email: 'gestor@cx3investimentos.com', role: 'escritorio_master', escritorioId: 'cx3', ativo: true, createdAt: '2026-01-04T00:00:00.000Z' },
+  { id: 'cx3-assessor-1', name: 'Fernanda (Assessor CX3)', email: 'fernanda@cx3investimentos.com', role: 'assessor', escritorioId: 'cx3', ativo: true, createdAt: '2026-01-05T00:00:00.000Z' },
+  { id: 'cliente-1', name: 'João Silva (Investidor Auto-service)', email: 'joao@silva.com', role: 'cliente_final', allowedClientIds: ['client-joao-1', 'client-filho-1'], ativo: true, createdAt: '2026-01-06T00:00:00.000Z' },
 ];
 
 /** Valores padrão para um store vazio (ex: primeiro acesso) */
 const defaultData: StoreData = {
+  escritorios: defaultEscritorios,
   users: defaultUsers,
   currentUserId: null,
   clients: [
-    { id: 'client-joao-1', name: 'João Silva', account: '10293-4', institution: 'BTG Pactual', cpf: '111.222.333-44', createdAt: '2026-01-01T12:00:00.000Z' },
-    { id: 'client-filho-1', name: 'Pedro Silva (Filho)', account: '55443-2', institution: 'BTG Pactual', cpf: '222.333.444-55', createdAt: '2026-01-02T12:00:00.000Z' },
+    { id: 'client-joao-1', name: 'João Silva', account: '10293-4', institution: 'BTG Pactual', cpf: '111.222.333-44', clienteFinalUserId: 'cliente-1', createdAt: '2026-01-01T12:00:00.000Z' },
+    { id: 'client-filho-1', name: 'Pedro Silva (Filho)', account: '55443-2', institution: 'BTG Pactual', cpf: '222.333.444-55', clienteFinalUserId: 'cliente-1', createdAt: '2026-01-02T12:00:00.000Z' },
     { id: 'client-miura-1', name: 'Ana Oliveira', account: '99887-1', institution: 'BTG Pactual', cpf: '333.444.555-66', escritorioId: 'miura', assessorId: 'miura-assessor-1', createdAt: '2026-01-03T12:00:00.000Z' },
     { id: 'client-cx3-1', name: 'Roberto Santos', account: '77665-2', institution: 'BTG Pactual', cpf: '444.555.666-77', escritorioId: 'cx3', assessorId: 'cx3-assessor-1', createdAt: '2026-01-04T12:00:00.000Z' },
   ],
@@ -155,9 +152,6 @@ async function idbSet<T>(key: string, value: T): Promise<void> {
 // ----------------------------------------------------------------------
 
 // --- TIER 2: CHUNKED LOCALSTORAGE BACKUP (Proteção contra fechamento do navegador) ---
-// Divide a Renda Fixa em pedaços menores (chunks) para salvar no localStorage
-// sem estourar o limite de 5MB. Se o navegador limpar o IndexedDB ao fechar,
-// o localStorage restaura instantaneamente!
 const RF_CHUNK_SIZE = 4000;
 
 function saveRfToLocalStorageChunks(refs: RendaFixaReferencia[]): void {
@@ -208,6 +202,7 @@ function loadData(): StoreData {
       return {
         ...defaultData,
         ...mainData,
+        escritorios: mainData.escritorios?.length ? mainData.escritorios : defaultEscritorios,
         users: mainData.users?.length ? mainData.users : defaultUsers,
         currentUserId: mainData.currentUserId ?? null,
         rendasFixasReferencia: rfBackup,
@@ -243,6 +238,7 @@ function loadData(): StoreData {
       });
 
       const mainData = {
+        escritorios: defaultEscritorios,
         users: defaultUsers,
         currentUserId: null,
         clients: legacyParsed.clients,
@@ -294,6 +290,7 @@ function loadData(): StoreData {
 function saveData(next: StoreData, prev?: StoreData): void {
   try {
     const mainChanged = !prev ||
+      next.escritorios !== prev.escritorios ||
       next.users !== prev.users ||
       next.currentUserId !== prev.currentUserId ||
       next.clients !== prev.clients ||
@@ -307,6 +304,7 @@ function saveData(next: StoreData, prev?: StoreData): void {
 
     if (mainChanged) {
       const mainData = {
+        escritorios: next.escritorios,
         users: next.users,
         currentUserId: next.currentUserId,
         clients: next.clients,
@@ -433,7 +431,7 @@ export function useStore() {
         notify();
       });
     }
-        return () => { listeners.delete(fn); };
+    return () => { listeners.delete(fn); };
   }, []);
 
   // ---------------------------------------------------------------------------
@@ -450,8 +448,8 @@ export function useStore() {
     if (currentUser.role === 'master_geral') {
       return storeData.clients; // Master Geral (Meros Capital) vê todos os clientes de todos os escritórios
     }
-    if (currentUser.role === 'escritorio_master') {
-      // Master do escritório vê todos os clientes daquele escritório específico
+    if (currentUser.role === 'escritorio_master' || currentUser.isCoMaster) {
+      // Master do escritório ou Assessor Co-Gestor vê todos os clientes daquele escritório específico
       return storeData.clients.filter(c => c.escritorioId === currentUser.escritorioId);
     }
     if (currentUser.role === 'assessor') {
@@ -459,8 +457,8 @@ export function useStore() {
       return storeData.clients.filter(c => c.assessorId === currentUser.id || (c.escritorioId === currentUser.escritorioId && !c.assessorId));
     }
     if (currentUser.role === 'cliente_final') {
-      // Cliente final vê apenas os IDs listados em allowedClientIds (sua conta e/ou do filho)
-      return storeData.clients.filter(c => currentUser.allowedClientIds?.includes(c.id));
+      // Cliente final vê as contas vinculadas via clienteFinalUserId ou listadas em allowedClientIds (sua conta e/ou do filho)
+      return storeData.clients.filter(c => c.clienteFinalUserId === currentUser.id || currentUser.allowedClientIds?.includes(c.id));
     }
     return [];
   }, [currentUser, storeData.clients]);
@@ -494,6 +492,27 @@ export function useStore() {
     }));
   }, []);
 
+  // --- Escritorios actions ---
+  const addEscritorio = useCallback((data: Omit<EscritorioParceiro, 'createdAt'>) => {
+    const esc: EscritorioParceiro = { ...data, createdAt: new Date().toISOString() };
+    updateStore(s => ({ ...s, escritorios: [...s.escritorios, esc] }));
+    return esc;
+  }, []);
+
+  const updateEscritorio = useCallback((id: string, data: Partial<EscritorioParceiro>) => {
+    updateStore(s => ({
+      ...s,
+      escritorios: s.escritorios.map(e => e.id === id ? { ...e, ...data } : e),
+    }));
+  }, []);
+
+  const deleteEscritorio = useCallback((id: string) => {
+    updateStore(s => ({
+      ...s,
+      escritorios: s.escritorios.filter(e => e.id !== id),
+    }));
+  }, []);
+
   // ---------------------------------------------------------------------------
   // CLIENTS
   // ---------------------------------------------------------------------------
@@ -504,11 +523,25 @@ export function useStore() {
       ...data, 
       id: uuidv4(), 
       createdAt: new Date().toISOString(),
-      escritorioId: currentUser?.escritorioId || data.escritorioId,
-      assessorId: currentUser?.role === 'assessor' ? currentUser.id : data.assessorId,
+      escritorioId: currentUser?.role !== 'master_geral' ? currentUser?.escritorioId : data.escritorioId,
+      assessorId: (currentUser?.role === 'assessor' && !currentUser?.isCoMaster) ? currentUser.id : data.assessorId,
     };
     updateStore(s => ({ ...s, clients: [...s.clients, client] }));
     return client;
+  }, [currentUser]);
+
+  /** Cadastra clientes em lote (Ex: via importação de planilha Excel) */
+  const bulkAddClients = useCallback((items: Omit<Client, 'id' | 'createdAt'>[]) => {
+    updateStore(s => {
+      const created = items.map(item => ({
+        ...item,
+        id: uuidv4(),
+        createdAt: new Date().toISOString(),
+        escritorioId: currentUser?.role !== 'master_geral' ? currentUser?.escritorioId : item.escritorioId,
+        assessorId: (currentUser?.role === 'assessor' && !currentUser?.isCoMaster) ? currentUser.id : item.assessorId,
+      }));
+      return { ...s, clients: [...s.clients, ...created] };
+    });
   }, [currentUser]);
 
   /** Atualiza campos de um cliente existente */
@@ -1099,12 +1132,13 @@ const setRendasFixasReferencia = useCallback((refs: RendaFixaReferencia[]) => {
     return storeData.draftNotes.find(x => x.id === id && x.clientId === clientId);
   }, []);
 
-    // ---------------------------------------------------------------------------
+  // ---------------------------------------------------------------------------
   // Retorno do hook — estado + actions
   // ---------------------------------------------------------------------------
 
   return {
     // ── Estado & Multi-Tenant ───────────────────────────────────────────────
+    escritorios:             storeData.escritorios,
     users:                   storeData.users,
     currentUser,
     activeClients,
@@ -1130,8 +1164,14 @@ const setRendasFixasReferencia = useCallback((refs: RendaFixaReferencia[]) => {
     updateUser,
     deleteUser,
 
+    // ── Escritorio actions ───────────────────────────────────────────────────
+    addEscritorio,
+    updateEscritorio,
+    deleteEscritorio,
+
     // ── Client actions ───────────────────────────────────────────────────────
     addClient,
+    bulkAddClients,
     updateClient,
     deleteClient,
     selectClient,

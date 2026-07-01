@@ -11,6 +11,7 @@ import DatabaseDashboard from './components/DatabaseDashboard';
 import PositionUpdateDashboard from './components/PositionUpdateDashboard';
 import Login from './components/Login';
 import UserManager from './components/UserManager';
+import SetupPassword from './components/SetupPassword';
 
 type Tab = 'dashboard' | 'performance' | 'overview' | 'position_update' | 'database' | 'clients' | 'strategies' | 'assets' | 'users';
 
@@ -33,6 +34,12 @@ export default function App() {
   const store = useStore();
   const [activeTab, setActiveTab] = useState<Tab>('clients');
 
+  // INTERCEPTADOR DE ONBOARDING: Verifica se há um link de convite na URL
+  const setupUserId = new URLSearchParams(window.location.search).get('setup');
+  if (setupUserId) {
+    return <SetupPassword userId={setupUserId} />;
+  }
+
   const currentUser = store.currentUser;
   if (!currentUser) {
     return <Login />;
@@ -41,24 +48,30 @@ export default function App() {
   const needsClient = activeTab === 'dashboard' || activeTab === 'performance' || activeTab === 'overview' || activeTab === 'position_update' || activeTab === 'strategies' || activeTab === 'assets';
   const noClientSelected = needsClient && !store.selectedClientId;
 
+  // ── MÁGICA DA PERMISSÃO DO CLIENTE FINAL (Direto Meros Capital vs Assessoria) ──
+  const selectedClient = store.selectedClient;
+  const isDirectEndClient = currentUser.role === 'cliente_final' && selectedClient && !selectedClient.escritorioId;
+
   // Filtra as abas exibidas de acordo com o nível de permissão (Cascata Multi-Tenant)
   const visibleTabs = allTabs.filter(tab => {
     if (tab.id === 'database' && currentUser.role !== 'master_geral') return false;
-    if (tab.id === 'users' && currentUser.role !== 'master_geral' && currentUser.role !== 'escritorio_master') return false;
-    if (tab.hideEndClient && currentUser.role === 'cliente_final') return false;
+    if (tab.id === 'users' && currentUser.role !== 'master_geral' && currentUser.role !== 'escritorio_master' && !currentUser.isCoMaster) return false;
+    // Se a aba for de edição (Estratégias / Ativos) e for cliente_final:
+    // Só esconde se a carteira atual pertencer a um escritório parceiro (Ex: Miura). Se for direta (Meros Capital), libera a edição!
+    if (tab.hideEndClient && currentUser.role === 'cliente_final' && !isDirectEndClient) return false;
     return true;
   });
 
   const ROLE_NAMES = {
     master_geral: 'Master Geral · Meros Capital',
     escritorio_master: `Gestor Master · ${currentUser.escritorioId?.toUpperCase() || 'Escritório'}`,
-    assessor: `Assessor · ${currentUser.escritorioId?.toUpperCase() || 'Escritório'}`,
+    assessor: `Assessor ${currentUser.isCoMaster ? '(Co-Gestor)' : ''} · ${currentUser.escritorioId?.toUpperCase() || 'Escritório'}`,
     cliente_final: 'Investidor Auto-service',
   };
 
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col">
-      {/* Top navbar */}
+      {/* Cabeçalho Institucional */}
       <header className="bg-white border-b border-gray-200 shadow-sm sticky top-0 z-40">
         <div className="max-w-[1500px] mx-auto px-4 py-0 flex items-center justify-between gap-4 overflow-x-auto">
           <div className="flex items-center gap-3 py-3 shrink-0">
@@ -71,7 +84,7 @@ export default function App() {
             </div>
           </div>
 
-          {/* Tabs */}
+          {/* Abas */}
           <nav className="flex items-center h-full shrink-0">
             {visibleTabs.map(tab => {
               const Icon = tab.icon;
@@ -98,7 +111,7 @@ export default function App() {
             })}
           </nav>
 
-          {/* User & Client indicators */}
+          {/* Indicadores de Usuário e Cliente */}
           <div className="flex items-center gap-3 py-2 shrink-0">
             {store.selectedClient && (
               <div className="flex items-center gap-2 px-3 py-1.5 bg-blue-50 rounded-xl border border-blue-100">
@@ -132,7 +145,7 @@ export default function App() {
       {/* Main content */}
       <main className="flex-1 max-w-[1500px] mx-auto w-full px-4 py-6">
         {/* Alert: no client */}
-        {noClientSelected && activeTab !== 'users' && (
+        {noClientSelected && (
           <div className="mb-6 p-4 bg-amber-50 border border-amber-200 rounded-2xl flex items-center gap-3 shadow-sm">
             <div className="text-2xl">⚠️</div>
             <div>
@@ -150,8 +163,7 @@ export default function App() {
             </div>
           </div>
         )}
-
-        {/* Tab content */}
+        {/* Telas das abas */}
         {activeTab === 'clients' && (
           <div className="max-w-4xl mx-auto">
             <ClientManager />
@@ -218,7 +230,7 @@ export default function App() {
         )}
       </main>
 
-      {/* Footer */}
+      {/* Rodapé */}
       <footer className="border-t border-gray-200 bg-white py-4 text-center text-xs text-gray-500 font-medium">
         <strong>Meros Wealth</strong> · Gestão Institucional de Portfólios · Criado por <strong>Meros Capital</strong> · © {new Date().getFullYear()}
       </footer>

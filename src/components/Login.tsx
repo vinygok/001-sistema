@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useStore } from '../store/useStore';
-import { TrendingUp, Shield, Users, Building2, UserCheck, Lock, ChevronRight } from 'lucide-react';
+import { TrendingUp, Shield, Building2, UserCheck, Lock, ChevronRight } from 'lucide-react';
 import type { AppUser } from '../types';
 
 export default function Login() {
@@ -9,6 +9,7 @@ export default function Login() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
 
+  // ── 1. FLUXO DE LOGIN ESTILIZADO E BLINDADO (Com verificação de Inadimplência) ──
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
     if (!email.trim()) {
@@ -22,16 +23,45 @@ export default function Login() {
       return;
     }
 
+    // BLOQUEIO 1: Checa se o usuário foi suspenso individualmente
+    if (found.ativo === false) {
+      setError('Acesso suspenso temporariamente. Por favor, entre em contato com o suporte da Meros Capital para regularizar sua assinatura.');
+      return;
+    }
+
+    // BLOQUEIO 2: Checa se o escritório parceiro inteiro está suspenso por inadimplência
+    if (found.escritorioId) {
+      const esc = store.escritorios.find(e => e.id === found.escritorioId);
+      if (esc && esc.ativo === false) {
+        setError(`O escritório ${esc.name} está temporariamente suspenso. Acesso bloqueado.`);
+        return;
+      }
+    }
+
     store.login(found.id);
   };
 
+  // ── 2. ACESSO RÁPIDO DE DEMONSTRAÇÃO (Para apresentação comercial aos escritórios) ──
   const handleDemoSelect = (user: AppUser) => {
+    if (user.ativo === false) {
+      setError('Acesso suspenso temporariamente. Por favor, entre em contato com o suporte da Meros Capital para regularizar sua assinatura.');
+      return;
+    }
+
+    if (user.escritorioId) {
+      const esc = store.escritorios.find(e => e.id === user.escritorioId);
+      if (esc && esc.ativo === false) {
+        setError(`O escritório ${esc.name} está temporariamente suspenso. Acesso bloqueado.`);
+        return;
+      }
+    }
+
     store.login(user.id);
   };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-blue-900 flex flex-col justify-between p-4 sm:p-8 text-gray-100">
-      {/* Top bar */}
+      {/* Cabeçalho Institucional */}
       <header className="max-w-6xl mx-auto w-full flex items-center justify-between py-4">
         <div className="flex items-center gap-3">
           <div className="p-2.5 bg-blue-600 rounded-xl shadow-lg shadow-blue-500/30">
@@ -48,10 +78,10 @@ export default function Login() {
         </div>
       </header>
 
-      {/* Main Container */}
+      {/* Conteúdo Central (Painel de Pitch & Formulário) */}
       <main className="max-w-6xl mx-auto w-full my-auto grid grid-cols-1 lg:grid-cols-12 gap-8 items-center py-10">
         
-        {/* Left column: Presentation & Meros Capital pitch */}
+        {/* Coluna da Esquerda: Pitch Comercial Meros Capital */}
         <div className="lg:col-span-6 space-y-6 text-left">
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-500/10 border border-blue-500/20 text-blue-300 text-xs font-semibold uppercase tracking-wider">
             Plataforma Institucional de Gestão
@@ -75,7 +105,7 @@ export default function Login() {
           </div>
         </div>
 
-        {/* Right column: Login form & Fast Demo logbox */}
+        {/* Coluna da Direita: Logbox */}
         <div className="lg:col-span-6 max-w-md mx-auto lg:ml-auto w-full">
           <div className="bg-gray-800/90 backdrop-blur-xl border border-gray-700/80 rounded-3xl shadow-2xl p-6 sm:p-8 space-y-6">
             
@@ -127,7 +157,7 @@ export default function Login() {
               </button>
             </form>
 
-            {/* FAST DEMO ACCESS (Para apresentação imediata do Master) */}
+            {/* Acesso rápido de Demonstração (Demobox) */}
             <div className="space-y-3 pt-6 border-t border-gray-700/60">
               <div className="text-xs font-bold text-gray-400 tracking-wide uppercase flex items-center justify-between">
                 <span>Simulador Multi-Tenant (Demo)</span>
@@ -138,12 +168,14 @@ export default function Login() {
                   const isMasterGeral = u.role === 'master_geral';
                   const isMasterEscritorio = u.role === 'escritorio_master';
                   const isAssessor = u.role === 'assessor';
+                  const isActive = u.ativo !== false;
                   
                   return (
                     <button
                       key={u.id}
                       onClick={() => handleDemoSelect(u)}
                       className={`flex items-center justify-between p-2.5 rounded-xl border text-left transition-all ${
+                        !isActive ? 'bg-red-500/10 border-red-500/30 text-red-300 opacity-60' :
                         isMasterGeral ? 'bg-amber-500/10 border-amber-500/30 hover:bg-amber-500/20 text-amber-300' :
                         isMasterEscritorio ? 'bg-indigo-500/10 border-indigo-500/30 hover:bg-indigo-500/20 text-indigo-300' :
                         isAssessor ? 'bg-blue-500/10 border-blue-500/30 hover:bg-blue-500/20 text-blue-300' :
@@ -151,7 +183,7 @@ export default function Login() {
                       }`}
                     >
                       <div>
-                        <div className="text-xs font-bold">{u.name}</div>
+                        <div className="text-xs font-bold">{u.name} {(!isActive) && '(Suspenso)'}</div>
                         <div className="text-[11px] opacity-80">{u.email} · <span className="font-semibold">{u.escritorioId ? `Escritório: ${u.escritorioId.toUpperCase()}` : (u.role === 'master_geral' ? 'Meros Capital' : 'Cliente Auto-service')}</span></div>
                       </div>
                       <ChevronRight size={16} className="opacity-60" />
@@ -166,7 +198,7 @@ export default function Login() {
 
       </main>
 
-      {/* Footer */}
+      {/* Rodapé */}
       <footer className="max-w-6xl mx-auto w-full border-t border-gray-800 pt-6 pb-2 text-center text-xs text-gray-500 flex flex-col sm:flex-row items-center justify-between gap-4">
         <span>© {new Date().getFullYear()} <strong>Meros Capital</strong>. Todos os direitos reservados.</span>
         <span>Meros Wealth Management System · Protegido por criptografia de ponta a ponta</span>
