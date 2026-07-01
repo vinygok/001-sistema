@@ -3,9 +3,9 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
-  "scripts": {
+    "scripts": {
     "dev": "vite",
-    "build": "node scripts/download-source.js && vite build",
+    "build": "vite build",
     "preview": "vite preview"
   },
   "dependencies": {
